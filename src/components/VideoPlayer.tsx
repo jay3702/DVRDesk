@@ -54,8 +54,6 @@ function srtToVtt(srt: string): string | null {
   return 'WEBVTT\n\n' + vtt;
 }
 
-const SKIP_FWD = 30;
-const SKIP_BACK = 10;
 const RE_ENABLE_BEFORE = 30; // seek this many seconds before block start to re-enable auto-skip
 type CaptionMode = 'off' | 'broadcast' | 'srt';
 
