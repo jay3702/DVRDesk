@@ -148,6 +148,34 @@ export default function TVShows() {
   });
   const requestedShowId = searchParams.get('showId');
   const requestedEpisodeId = searchParams.get('episodeId');
+  const prevEpisodeIdRef = useRef<string | null>(null);
+
+  // Restore focus to the episode card when the detail pane closes.
+  useEffect(() => {
+    if (selectedEpisode) {
+      prevEpisodeIdRef.current = selectedEpisode.id;
+    } else if (prevEpisodeIdRef.current) {
+      const id = prevEpisodeIdRef.current;
+      prevEpisodeIdRef.current = null;
+      requestAnimationFrame(() => {
+        const card = document.querySelector<HTMLElement>(`[data-media-id="${id}"]`);
+        if (card) {
+          card.focus({ preventScroll: true });
+          card.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+  }, [selectedEpisode?.id]);
+
+  // When a show's episodes finish loading with no pre-selected episode, focus the first card.
+  useEffect(() => {
+    if (loadingEps || !selectedShow || selectedEpisode) return;
+    requestAnimationFrame(() => {
+      const first = document.querySelector<HTMLElement>('.media-grid .media-card[tabindex="0"]');
+      if (first) first.focus({ preventScroll: true });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingEps, selectedShow?.id]);
   const showListRef = useRef<HTMLUListElement | null>(null);
 
   useEffect(() => {
@@ -460,7 +488,8 @@ export default function TVShows() {
               const label = subtitle ? `${title} – ${subtitle}` : title;
               playItem(selectedEpisode.id, label, selectedEpisode.path, selectedEpisode.commercials, '', selectedEpisode.playback_time, 'episode');
             }}
-            onNavigateToShow={() => setSelectedEpisode(null)}
+            onBack={() => setSelectedEpisode(null)}
+            backLabel="← Back to episodes"
             onTrash={() => void handleTrashEpisode(selectedEpisode)}
             onMarkNotRecorded={selectedEpisodeRuleId && selectedEpisode.program_id ? () => void handleMarkNotRecorded(selectedEpisode) : undefined}
           />

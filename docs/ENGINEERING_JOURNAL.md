@@ -14,6 +14,42 @@ This file adds the decision context that is usually missing from commit messages
 
 ## Unreleased
 
+### 2026-05-03 - Auto-focus first episode card when TV show is selected
+
+- Request: when a TV show is selected for the first time (or switched), automatically focus the first episode card in the grid so keyboard navigation can begin without a manual click.
+- Rationale: episodes load asynchronously after show selection; focus cannot be set until the episode list has rendered.
+- Solution:
+  - `TVShows.tsx`: added a `useEffect` on `[loadingEps, selectedShow?.id]` that fires when `loadingEps` transitions to `false` with a show selected and no episode detail open; uses `requestAnimationFrame` to focus `.media-grid .media-card[tabindex="0"]` after the grid has painted.
+  - Naturally re-fires when the user switches shows, giving each new show grid its own auto-focus.
+- Validation: TypeScript diagnostics clean.
+
+### 2026-05-05 - Keyboard D-pad navigation across sidebar / list / grid zones
+
+- Request: add arrow-key navigation so the app can be operated without a mouse — left/right arrows move between sidebar, list, and grid zones; up/down navigate within a zone; Enter selection uses native element behavior.
+- Rationale: TV-style apps should be fully keyboard-navigable; existing elements (`a.sidebar__link`, `button.show-item`, `button.rec-item`, `.media-card[tabindex="0"]`) are already focusable.
+- Solution:
+  - `src/lib/useKeyboardNav.ts` (new): global `keydown` capture listener on `window`; detects active zone from `document.activeElement` using `matches()`; implements per-zone directional logic:
+    - Sidebar: Up/Down within `a.sidebar__link` items; Right → list zone (or grid if no list), remembers last list focus.
+    - List zone: Up/Down within `button.show-item, button.rec-item`; Left → active sidebar link; Right → first grid item; remembers last position.
+    - Grid zone: Left/Right within a row; Up/Down to closest-horizontal item in adjacent row via `getBoundingClientRect` row-grouping; Up from top row / Left from leftmost item → list or sidebar.
+    - No-op when `nowPlayingId` is set (player owns keyboard), when focus is inside `input`/`textarea`/`select`, or inside `.media-modal`.
+    - Any arrow when nothing nav-relevant is focused → focuses first sidebar link.
+  - `src/App.tsx`: added `useKeyboardNav()` call inside `App()`.
+  - `src/pages/Page.css`: added `:focus-visible` outline (2px solid #0078d4) for `.show-item` and `.rec-item`.
+  - `src/components/Sidebar.css`: added `:focus-visible` outline for `.sidebar__link`.
+  - `src/components/MediaCard.css`: already had `:focus-visible` outline — no change needed.
+- Validation: TypeScript diagnostics clean; no errors in `useKeyboardNav.ts` or `App.tsx`.
+
+### 2026-05-05 - Configurable keybindings and skip intervals for the video player
+
+- Request: add configurable keyboard shortcuts for all player commands (skip forward/back, fast forward/reverse, play/pause, close), with configurable skip interval durations, and reasonable defaults.
+- Solution:
+  - `useStore.ts`: added `KeybindingsConfig` and `SkipIntervalsConfig` interfaces, `DEFAULT_KEYBINDINGS` and `DEFAULT_SKIP_INTERVALS` constants, and corresponding `keybindings`/`setKeybindings`/`skipIntervals`/`setSkipIntervals` store state persisted via `localStorage`.
+  - `VideoPlayer.tsx`: replaced hardcoded `SKIP_FWD`/`SKIP_BACK` constants with store-driven `skipIntervals`; skip buttons display live interval values; unified `onPlayerKeyDown` handler uses `keybindings` from store to match keys for all commands; imports updated for `useCallback`.
+  - `Settings.tsx`: added "Player Keybindings & Skip Intervals" section with a table allowing per-action key (comma-separated) and skip duration (seconds) configuration; saved to store on button press with a `✓ Saved` confirmation.
+- Recovery: Settings.tsx was completely mangled by earlier failed patch attempts (duplicate `export default`, import statements inside function bodies, floating JSX outside return). The file was reconstructed in full via `replace_string_in_file` after trimming it to a clean 13-line header with `Set-Content`.
+- Validation: TypeScript diagnostics clean for all three modified files.
+
 ### 2026-04-26 - Local bug report composer with persistent 48-hour client error log
 
 - Request: replace the GitHub-dependent report flow with a local bug report composer suitable for Channels Community posts, and include a persistent client-side error log that retains the last 48 hours.
