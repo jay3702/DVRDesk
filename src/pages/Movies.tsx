@@ -94,6 +94,26 @@ export default function Movies() {
   const [searchParams] = useSearchParams();
   const requestedMovieId = searchParams.get('movieId');
   const pageRef = useRef<HTMLDivElement | null>(null);
+  const moviePlayBtnRef = useRef<HTMLButtonElement>(null);
+  const prevMovieIdRef = useRef<string | null>(null);
+
+  // Auto-focus the play button when detail opens; restore focus to the card when it closes.
+  useEffect(() => {
+    if (selectedMovie) {
+      prevMovieIdRef.current = selectedMovie.id;
+      moviePlayBtnRef.current?.focus({ preventScroll: true });
+    } else if (prevMovieIdRef.current) {
+      const id = prevMovieIdRef.current;
+      prevMovieIdRef.current = null;
+      requestAnimationFrame(() => {
+        const card = document.querySelector<HTMLElement>(`[data-media-id="${id}"]`);
+        if (card) {
+          card.focus({ preventScroll: true });
+          card.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+  }, [selectedMovie?.id]);
 
   useEffect(() => {
     localStorage.setItem(MOVIES_SORT_STATE_KEY, JSON.stringify({ sort, sortOrder }));
@@ -265,6 +285,7 @@ export default function Movies() {
                 ← Back to movie list
               </button>
               <button
+                ref={moviePlayBtnRef}
                 className="media-detail__thumb"
                 onClick={() => playItem(
                   selectedMovie.id,

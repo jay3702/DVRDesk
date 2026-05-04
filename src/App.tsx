@@ -10,6 +10,7 @@ import Library from './pages/Library';
 import Search from './pages/Search';
 import Settings from './pages/Settings';
 import { useStore } from './store/useStore';
+import { useKeyboardNav } from './lib/useKeyboardNav';
 import './App.css';
 
 interface UpdateInfo {
@@ -61,6 +62,7 @@ async function fetchLatestRelease(): Promise<UpdateInfo | null> {
 
 function App() {
   const { activeServerId, serverChangeVersion, probeActiveServer, apiVersionApproved } = useStore();
+  useKeyboardNav();
   const [probing, setProbing] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const didCheckUpdateRef = useRef(false);

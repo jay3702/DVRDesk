@@ -9,12 +9,32 @@ import {
   setServerUrl,
 } from '../api/client';
 
+
 const SHARE_KEY = 'dvr_storage_share';
 const SERVERS_KEY = 'dvr_servers';
 const ACTIVE_SERVER_KEY = 'dvr_active_server_id';
 const PLAYBACK_REMUX_KEY = 'playback_prefer_remux';
 const DIAGNOSTICS_ENABLED_KEY = 'diagnostics_enabled';
 const LIVE_SHOW_HIDDEN_KEY = 'live_show_hidden_channels';
+const KEYBINDINGS_KEY = 'player_keybindings';
+const SKIP_INTERVALS_KEY = 'player_skip_intervals';
+
+// Reasonable defaults for keybindings and skip intervals
+export const DEFAULT_KEYBINDINGS = {
+  skipForward: ['ArrowRight', 'l'],
+  skipBack: ['ArrowLeft', 'j'],
+  fastForward: ['Shift+ArrowRight'],
+  fastReverse: ['Shift+ArrowLeft'],
+  playPause: [' ', 'k'],
+  close: ['Escape'],
+};
+
+export const DEFAULT_SKIP_INTERVALS = {
+  skipForward: 30,
+  skipBack: 10,
+  fastForward: 60,
+  fastReverse: 60,
+};
 
 export interface ServerOption {
   id: string;
@@ -77,7 +97,28 @@ const boot = bootstrapServers();
 const bootActive = boot.servers.find((s) => s.id === boot.activeServerId) ?? boot.servers[0];
 persistServers(boot.servers, bootActive.id);
 
+export interface KeybindingsConfig {
+  skipForward: string[];
+  skipBack: string[];
+  fastForward: string[];
+  fastReverse: string[];
+  playPause: string[];
+  close: string[];
+}
+
+export interface SkipIntervalsConfig {
+  skipForward: number;
+  skipBack: number;
+  fastForward: number;
+  fastReverse: number;
+}
+
 export interface AppState {
+    // Player keybindings and skip intervals
+    keybindings: KeybindingsConfig;
+    setKeybindings: (bindings: KeybindingsConfig) => void;
+    skipIntervals: SkipIntervalsConfig;
+    setSkipIntervals: (intervals: SkipIntervalsConfig) => void;
   servers: ServerOption[];
   activeServerId: string;
   serverUrl: string;
@@ -133,7 +174,33 @@ export interface AppState {
   stopPlayback: () => void;
 }
 
+function loadKeybindings(): KeybindingsConfig {
+  try {
+    const raw = localStorage.getItem(KEYBINDINGS_KEY);
+    if (raw) return { ...DEFAULT_KEYBINDINGS, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_KEYBINDINGS };
+}
+
+function loadSkipIntervals(): SkipIntervalsConfig {
+  try {
+    const raw = localStorage.getItem(SKIP_INTERVALS_KEY);
+    if (raw) return { ...DEFAULT_SKIP_INTERVALS, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_SKIP_INTERVALS };
+}
+
 export const useStore = create<AppState>((set) => ({
+    keybindings: loadKeybindings(),
+    setKeybindings: (bindings) => {
+      localStorage.setItem(KEYBINDINGS_KEY, JSON.stringify(bindings));
+      set({ keybindings: bindings });
+    },
+    skipIntervals: loadSkipIntervals(),
+    setSkipIntervals: (intervals) => {
+      localStorage.setItem(SKIP_INTERVALS_KEY, JSON.stringify(intervals));
+      set({ skipIntervals: intervals });
+    },
   servers: boot.servers,
   activeServerId: bootActive.id,
   serverUrl: bootActive.url,

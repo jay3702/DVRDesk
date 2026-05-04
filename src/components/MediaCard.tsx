@@ -54,6 +54,7 @@ function formatDateTime(ms: number): string {
 }
 
 export default function MediaCard({
+  id,
   title,
   subtitle,
   imageUrl,
@@ -93,6 +94,7 @@ export default function MediaCard({
       className={`media-card ${watched ? 'media-card--watched' : ''} ${selected ? 'media-card--selected' : ''}`}
       role="button"
       tabIndex={0}
+      data-media-id={id}
       onClick={onClick}
       aria-label={ariaLabel}
       onKeyDown={e => {

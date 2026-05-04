@@ -12,7 +12,7 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
-## Unreleased
+## v1.4.1
 
 ### 2026-05-03 - Auto-focus first episode card when TV show is selected
 

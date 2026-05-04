@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useStore, type ServerOption } from '../store/useStore';
+import { useStore, type ServerOption, DEFAULT_KEYBINDINGS, DEFAULT_SKIP_INTERVALS, type KeybindingsConfig, type SkipIntervalsConfig } from '../store/useStore';
 import {
   fetchCompatibilityMatrix,
   fetchServerVersionInfo,
@@ -120,10 +120,8 @@ function redactServerUrls(text: string, serverList: ServerOption[]): string {
   for (const server of serverList) {
     const urls = [server.url, server.tailscaleUrl].filter(Boolean) as string[];
     for (const url of urls) {
-      // Escape special regex characters in the URL string.
       const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       out = out.replace(new RegExp(escaped, 'g'), `[${server.name}]`);
-      // Also match just the host:port without the scheme so bare IP:port occurrences are caught.
       try {
         const { host } = new URL(url);
         const escapedHost = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -144,6 +142,15 @@ function areSameServers(a: ServerOption[], b: ServerOption[]): boolean {
   });
 }
 
+const ACTION_LABELS: Record<keyof KeybindingsConfig, string> = {
+  skipForward: 'Skip Forward',
+  skipBack: 'Skip Back',
+  fastForward: 'Fast Forward',
+  fastReverse: 'Fast Reverse',
+  playPause: 'Play / Pause',
+  close: 'Close Player',
+};
+
 export default function Settings() {
   const {
     servers,
@@ -160,7 +167,12 @@ export default function Settings() {
     apiPublicVersion,
     apiVersionApproved,
     apiCompatibilityNote,
+    keybindings,
+    setKeybindings,
+    skipIntervals,
+    setSkipIntervals,
   } = useStore();
+
   const [draftServers, setDraftServers] = useState<ServerOption[]>(servers);
   const [shareDraft, setShareDraft] = useState(storageSharePath);
   const [saved, setSaved] = useState(false);
@@ -174,10 +186,13 @@ export default function Settings() {
   const [logViewOpen, setLogViewOpen] = useState(false);
   const [logViewText, setLogViewText] = useState('');
   const [reportCopyMessage, setReportCopyMessage] = useState<string | null>(null);
+  const [bindingsDraft, setBindingsDraft] = useState<KeybindingsConfig>(keybindings);
+  const [intervalsDraft, setIntervalsDraft] = useState<SkipIntervalsConfig>(skipIntervals);
+  const [playerSettingsSaved, setPlayerSettingsSaved] = useState(false);
 
-  useEffect(() => {
-    setDraftServers(servers);
-  }, [servers]);
+  useEffect(() => { setDraftServers(servers); }, [servers]);
+  useEffect(() => { setBindingsDraft(keybindings); }, [keybindings]);
+  useEffect(() => { setIntervalsDraft(skipIntervals); }, [skipIntervals]);
 
   useEffect(() => {
     void (async () => {
@@ -188,6 +203,24 @@ export default function Settings() {
       }
     })();
   }, []);
+
+  function handleKeybindingChange(action: keyof KeybindingsConfig, value: string) {
+    setBindingsDraft((prev) => ({ ...prev, [action]: value.split(',').map(s => s.trim()).filter(Boolean) }));
+  }
+
+  function handleIntervalChange(action: keyof SkipIntervalsConfig, value: string) {
+    const num = Number(value);
+    if (!isNaN(num) && num > 0) {
+      setIntervalsDraft((prev) => ({ ...prev, [action]: num }));
+    }
+  }
+
+  function savePlayerSettings() {
+    setKeybindings(bindingsDraft);
+    setSkipIntervals(intervalsDraft);
+    setPlayerSettingsSaved(true);
+    setTimeout(() => setPlayerSettingsSaved(false), 2000);
+  }
 
   function updateServer(serverId: string, field: 'name' | 'url' | 'tailscaleUrl', value: string) {
     setDraftServers((prev) =>
@@ -515,6 +548,58 @@ export default function Settings() {
           </label>
           <p className="settings-hint">
             Shows in-player diagnostics tools, including a live stats overlay and report copy button for troubleshooting playback.
+          </p>
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section__title">Player Keybindings &amp; Skip Intervals</h2>
+          <table className="settings-table" aria-label="Player keybindings">
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Key(s) <span style={{ fontWeight: 400 }}>(comma-separated)</span></th>
+                <th>Skip (s)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(Object.keys(DEFAULT_KEYBINDINGS) as (keyof KeybindingsConfig)[]).map((action) => (
+                <tr key={action}>
+                  <td>{ACTION_LABELS[action]}</td>
+                  <td>
+                    <input
+                      className="settings-input"
+                      type="text"
+                      value={bindingsDraft[action]?.join(', ') ?? ''}
+                      onChange={(e) => handleKeybindingChange(action, e.target.value)}
+                      placeholder={DEFAULT_KEYBINDINGS[action].join(', ')}
+                      spellCheck={false}
+                    />
+                  </td>
+                  <td>
+                    {action in DEFAULT_SKIP_INTERVALS ? (
+                      <input
+                        className="settings-input"
+                        type="number"
+                        min={1}
+                        value={intervalsDraft[action as keyof SkipIntervalsConfig] ?? ''}
+                        onChange={(e) => handleIntervalChange(action as keyof SkipIntervalsConfig, e.target.value)}
+                        placeholder={String(DEFAULT_SKIP_INTERVALS[action as keyof SkipIntervalsConfig])}
+                        style={{ width: '5em' }}
+                      />
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="settings-row settings-row--top-gap">
+            <button className="settings-save-btn" onClick={savePlayerSettings}>
+              {playerSettingsSaved ? '✓ Saved' : 'Save Player Settings'}
+            </button>
+          </div>
+          <p className="settings-hint">
+            Configure keyboard shortcuts for the video player. Use key names like <code>ArrowRight</code>, <code>l</code>, <code>Shift+ArrowLeft</code>, <code>Space</code>, <code>Escape</code>. Separate multiple keys with commas.
+            Skip interval only applies to skip/fast-forward/reverse actions.
           </p>
         </section>
 

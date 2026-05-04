@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { invoke } from '@tauri-apps/api/core';
 import request, { streamUrl } from '../api/client';
@@ -10,7 +10,7 @@ import {
   setMoviePlaybackTime,
   setMovieWatched,
 } from '../api/recordings';
-import { useStore } from '../store/useStore';
+import { useStore, DEFAULT_KEYBINDINGS, DEFAULT_SKIP_INTERVALS } from '../store/useStore';
 import { buildTauriHlsLoader } from '../lib/hlsTauriLoader';
 import './VideoPlayer.css';
 
@@ -182,6 +182,8 @@ export default function VideoPlayer() {
     serverChangeVersion,
     preferRemux,
     diagnosticsEnabled,
+    keybindings,
+    skipIntervals,
   } = useStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -365,36 +367,89 @@ export default function VideoPlayer() {
     return () => window.clearInterval(id);
   }, [diagnosticsEnabled, nowPlayingId, nowPlayingManifestUrl]);
 
-  useEffect(() => {
-    if (!diagnosticsEnabled || !nowPlayingId) return;
-
-    function isShiftS(e: KeyboardEvent): boolean {
-      if (!e.shiftKey) return false;
-      if (e.code === 'KeyS') return true;
-      return e.key.toLowerCase() === 's';
-    }
-
-    function onToggleStatsHotkey(e: KeyboardEvent) {
-      if (!isShiftS(e)) return;
-      if (e.repeat) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowStats((v) => !v);
-    }
-
+  // Unified skip/seek function
+  const skipBy = useCallback((delta: number) => {
     const video = videoRef.current;
-    const overlay = overlayRef.current;
-    window.addEventListener('keydown', onToggleStatsHotkey, true);
-    document.addEventListener('keydown', onToggleStatsHotkey, true);
-    video?.addEventListener('keydown', onToggleStatsHotkey);
-    overlay?.addEventListener('keydown', onToggleStatsHotkey);
-    return () => {
-      window.removeEventListener('keydown', onToggleStatsHotkey, true);
-      document.removeEventListener('keydown', onToggleStatsHotkey, true);
-      video?.removeEventListener('keydown', onToggleStatsHotkey);
-      overlay?.removeEventListener('keydown', onToggleStatsHotkey);
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + delta));
+  }, []);
+
+  // Play/pause toggle
+  const togglePlayPause = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) video.play();
+    else video.pause();
+  }, []);
+
+  // Keydown handler for all player commands
+  const onPlayerKeyDown = useCallback((e: KeyboardEvent) => {
+    // Helper to match keybindings (supports Shift+Key, etc)
+    function matchBinding(binding: string): boolean {
+      if (binding.startsWith('Shift+')) {
+        return e.shiftKey && (e.key === binding.slice(6) || e.code === binding.slice(6));
+      }
+      if (binding === ' ' || binding === 'Space') return e.key === ' ' || e.code === 'Space';
+      return e.key === binding || e.code === binding;
+    }
+    // Use settings or fallback to defaults
+    const binds = keybindings || DEFAULT_KEYBINDINGS;
+    const intervals = skipIntervals || DEFAULT_SKIP_INTERVALS;
+    // Skip Forward
+    if (binds.skipForward.some(matchBinding)) {
+      e.preventDefault();
+      skipBy(intervals.skipForward);
+      return;
+    }
+    // Skip Back
+    if (binds.skipBack.some(matchBinding)) {
+      e.preventDefault();
+      skipBy(-intervals.skipBack);
+      return;
+    }
+    // Fast Forward
+    if (binds.fastForward.some(matchBinding)) {
+      e.preventDefault();
+      skipBy(intervals.fastForward);
+      return;
+    }
+    // Fast Reverse
+    if (binds.fastReverse.some(matchBinding)) {
+      e.preventDefault();
+      skipBy(-intervals.fastReverse);
+      return;
+    }
+    // Play/Pause
+    if (binds.playPause.some(matchBinding)) {
+      e.preventDefault();
+      togglePlayPause();
+      return;
+    }
+    // Close Player
+    if (binds.close.some(matchBinding)) {
+      e.preventDefault();
+      stopPlayback();
+      return;
+    }
+  }, [keybindings, skipIntervals, skipBy, togglePlayPause, stopPlayback]);
+
+  useEffect(() => {
+    if (!nowPlayingId) return;
+    // Attach keydown handler for player commands
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      onPlayerKeyDown(e);
+      // Also handle stats overlay toggle (Shift+S)
+      if (diagnosticsEnabled && e.shiftKey && (e.key === 'S' || e.key === 's' || e.code === 'KeyS')) {
+        e.preventDefault();
+        setShowStats((v) => !v);
+      }
     };
-  }, [diagnosticsEnabled, nowPlayingId]);
+    window.addEventListener('keydown', handler, true);
+    return () => {
+      window.removeEventListener('keydown', handler, true);
+    };
+  }, [nowPlayingId, onPlayerKeyDown, diagnosticsEnabled]);
 
   useEffect(() => {
     function onFullscreenChange() {
@@ -713,12 +768,6 @@ export default function VideoPlayer() {
     };
   }, [nowPlayingKey, nowPlayingRecordingKind, nowPlayingResumeTime]);
 
-  function skipBy(delta: number) {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + delta));
-  }
-
   function setCaptionModeAndApply(mode: CaptionMode) {
     setCaptionMode(mode);
     const video = videoRef.current;
@@ -837,11 +886,11 @@ export default function VideoPlayer() {
               {skipAds ? '⏭ Skip Ads: On' : '⏭ Skip Ads: Off'}
             </button>
           )}
-          <button className="video-jump-btn" onClick={() => skipBy(-SKIP_BACK)} title={`Back ${SKIP_BACK} seconds`}>
-            ↺ {SKIP_BACK}s
+          <button className="video-jump-btn" onClick={() => skipBy(-(skipIntervals?.skipBack ?? DEFAULT_SKIP_INTERVALS.skipBack))} title={`Back ${(skipIntervals?.skipBack ?? DEFAULT_SKIP_INTERVALS.skipBack)} seconds`}>
+            ↺ {skipIntervals?.skipBack ?? DEFAULT_SKIP_INTERVALS.skipBack}s
           </button>
-          <button className="video-jump-btn" onClick={() => skipBy(SKIP_FWD)} title={`Forward ${SKIP_FWD} seconds`}>
-            {SKIP_FWD}s ↻
+          <button className="video-jump-btn" onClick={() => skipBy(skipIntervals?.skipForward ?? DEFAULT_SKIP_INTERVALS.skipForward)} title={`Forward ${(skipIntervals?.skipForward ?? DEFAULT_SKIP_INTERVALS.skipForward)} seconds`}>
+            {skipIntervals?.skipForward ?? DEFAULT_SKIP_INTERVALS.skipForward}s ↻
           </button>
           {diagnosticsEnabled && (
             <button

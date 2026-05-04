@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { getServerUrl } from '../api/client';
 
 // Minimal shape required to render the detail pane — satisfied by both
@@ -79,6 +80,12 @@ export default function RecordingDetail({
   onMarkNotRecorded,
 }: RecordingDetailProps) {
   const thumb = resolveThumb(item);
+  const playBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Auto-focus the play button whenever a new item is shown so Enter triggers playback.
+  useEffect(() => {
+    playBtnRef.current?.focus({ preventScroll: true });
+  }, [item.id]);
 
   return (
     <div className="rec-detail">
@@ -88,14 +95,24 @@ export default function RecordingDetail({
         </button>
       )}
 
-      {thumb && (
+      {thumb ? (
         <button
+          ref={playBtnRef}
           className="rec-detail__thumb"
           onClick={onPlay}
           title="Play recording"
         >
           <img src={thumb} alt={recLabel(item)} />
           <div className="rec-detail__play-icon">▶</div>
+        </button>
+      ) : (
+        <button
+          ref={playBtnRef}
+          className="rec-detail__play-btn"
+          onClick={onPlay}
+          title="Play recording"
+        >
+          <span className="rec-detail__play-btn-icon">▶</span> Play
         </button>
       )}
 

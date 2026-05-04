@@ -74,6 +74,7 @@ export default function Library() {
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const serverChangeVersion = useStore((s) => s.serverChangeVersion);
+  const playItem = useStore((s) => s.playItem);
   const { width: sidebarWidth, isResizing, handleMouseDown } = useResizableSidebar({
     initialWidth: 220,
     minWidth: 180,
@@ -289,6 +290,8 @@ export default function Library() {
                   onClick={() => setSelectedVideoId(v.id)}
                   selected={selectedVideoId === v.id}
                   ariaLabel={`Select ${v.video_title}`}
+                  onPlayAction={() => playItem(v.id, v.video_title, undefined, [], undefined, v.playback_time, null)}
+                  playActionLabel="Play video"
                 />
               ))}
             </div>
