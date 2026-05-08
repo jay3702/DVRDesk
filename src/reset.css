@@ -11,8 +11,8 @@ html, body, #root {
 }
 
 body {
-  background: #12121e;
-  color: #d4d4d4;
+  background: var(--wc-bg);
+  color: var(--wc-text);
 }
 
 /* Scrollbar styling */
@@ -23,9 +23,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--wc-scrollbar);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #444;
+  background: var(--wc-scrollbar-hover);
 }

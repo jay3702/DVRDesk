@@ -1,0 +1,253 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   WinChannels Theme Definitions
+   All color variables used throughout the application.
+
+   Three themes are supported:
+     • System  – no [data-theme] attribute; OS preference via @media
+     • Dark    – html[data-theme="dark"]
+     • Light   – html[data-theme="light"]
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Dark theme (default) ───────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --wc-bg: #12121e;
+  --wc-bg-sidebar: #141420;
+  --wc-bg-surface: #1e1e2e;
+  --wc-bg-surface-2: #111826;
+  --wc-bg-input: #1a1a28;
+  --wc-bg-hover: #1e1e30;
+  --wc-bg-active: #1a3a5c;
+  --wc-bg-active-hover: #1e4a72;
+  --wc-bg-btn-secondary: #2a2f42;
+  --wc-bg-btn-secondary-hover: #38415f;
+  --wc-bg-danger: #3a1a1a;
+  --wc-bg-danger-hover: #5a2020;
+
+  /* Borders */
+  --wc-border: #2a2a3a;
+  --wc-border-subtle: #333;
+  --wc-border-focus: #0078d4;
+  --wc-border-danger: #c42b2b;
+
+  /* Text */
+  --wc-text: #d4d4d4;
+  --wc-text-heading: #e0e0e0;
+  --wc-text-secondary: #a0a0b0;
+  --wc-text-muted: #888;
+  --wc-text-faint: #666;
+  --wc-text-active: #60b0f0;
+  --wc-text-danger: #f08080;
+  --wc-text-danger-hover: #ff9999;
+
+  /* Accent */
+  --wc-accent: #0078d4;
+  --wc-accent-hover: #106ebe;
+
+  /* Status */
+  --wc-ok: #4caf50;
+  --wc-warn: #e07b00;
+  --wc-error: #e06c75;
+
+  /* Test result blocks */
+  --wc-test-ok-bg: #0a2a0a;
+  --wc-test-ok-border: #2a5a2a;
+  --wc-test-ok-text: #6fcf6f;
+  --wc-test-err-bg: #2a0a0a;
+  --wc-test-err-border: #5a2a2a;
+  --wc-test-err-text: #cf6f6f;
+
+  /* Update notification banner */
+  --wc-banner-update-bg: #12301f;
+  --wc-banner-update-border: #2f6f4a;
+  --wc-banner-update-text: #b3f3cb;
+  --wc-banner-update-link: #8ce7b3;
+  --wc-banner-update-link-hover: #b3ffd3;
+
+  /* API compatibility banner */
+  --wc-banner-api-bg: #3a1a00;
+  --wc-banner-api-border: #7a3800;
+  --wc-banner-api-text: #ffc07a;
+  --wc-banner-api-link: #ff8c30;
+  --wc-banner-api-link-hover: #ffaa60;
+
+  /* Misc */
+  --wc-scrollbar: #333;
+  --wc-scrollbar-hover: #444;
+  --wc-art-bg: #111;
+  --wc-art-placeholder: #444;
+  --wc-progress-bg: #23233a;
+}
+
+/* ── Explicit dark override (wins over system auto) ─────────────────────── */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --wc-bg: #12121e;
+  --wc-bg-sidebar: #141420;
+  --wc-bg-surface: #1e1e2e;
+  --wc-bg-surface-2: #111826;
+  --wc-bg-input: #1a1a28;
+  --wc-bg-hover: #1e1e30;
+  --wc-bg-active: #1a3a5c;
+  --wc-bg-active-hover: #1e4a72;
+  --wc-bg-btn-secondary: #2a2f42;
+  --wc-bg-btn-secondary-hover: #38415f;
+  --wc-bg-danger: #3a1a1a;
+  --wc-bg-danger-hover: #5a2020;
+  --wc-border: #2a2a3a;
+  --wc-border-subtle: #333;
+  --wc-border-focus: #0078d4;
+  --wc-border-danger: #c42b2b;
+  --wc-text: #d4d4d4;
+  --wc-text-heading: #e0e0e0;
+  --wc-text-secondary: #a0a0b0;
+  --wc-text-muted: #888;
+  --wc-text-faint: #666;
+  --wc-text-active: #60b0f0;
+  --wc-text-danger: #f08080;
+  --wc-text-danger-hover: #ff9999;
+  --wc-accent: #0078d4;
+  --wc-accent-hover: #106ebe;
+  --wc-ok: #4caf50;
+  --wc-warn: #e07b00;
+  --wc-error: #e06c75;
+  --wc-test-ok-bg: #0a2a0a;
+  --wc-test-ok-border: #2a5a2a;
+  --wc-test-ok-text: #6fcf6f;
+  --wc-test-err-bg: #2a0a0a;
+  --wc-test-err-border: #5a2a2a;
+  --wc-test-err-text: #cf6f6f;
+  --wc-banner-update-bg: #12301f;
+  --wc-banner-update-border: #2f6f4a;
+  --wc-banner-update-text: #b3f3cb;
+  --wc-banner-update-link: #8ce7b3;
+  --wc-banner-update-link-hover: #b3ffd3;
+  --wc-banner-api-bg: #3a1a00;
+  --wc-banner-api-border: #7a3800;
+  --wc-banner-api-text: #ffc07a;
+  --wc-banner-api-link: #ff8c30;
+  --wc-banner-api-link-hover: #ffaa60;
+  --wc-scrollbar: #333;
+  --wc-scrollbar-hover: #444;
+  --wc-art-bg: #111;
+  --wc-art-placeholder: #444;
+  --wc-progress-bg: #23233a;
+}
+
+/* ── Light theme values ─────────────────────────────────────────────────── */
+:root:not([data-theme]) {
+  /* When no explicit theme is set, OS light preference switches to light */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --wc-bg: #f0f2f5;
+    --wc-bg-sidebar: #e4e6ee;
+    --wc-bg-surface: #ffffff;
+    --wc-bg-surface-2: #eef1f8;
+    --wc-bg-input: #ffffff;
+    --wc-bg-hover: #e6e9f0;
+    --wc-bg-active: #cde4ff;
+    --wc-bg-active-hover: #b5d4ff;
+    --wc-bg-btn-secondary: #dde1ed;
+    --wc-bg-btn-secondary-hover: #ccd0e0;
+    --wc-bg-danger: #fff0f0;
+    --wc-bg-danger-hover: #ffe0e0;
+    --wc-border: #cdd1dd;
+    --wc-border-subtle: #dde0ea;
+    --wc-border-focus: #0078d4;
+    --wc-border-danger: #e53935;
+    --wc-text: #1a1a2e;
+    --wc-text-heading: #0d0d1a;
+    --wc-text-secondary: #4a5568;
+    --wc-text-muted: #718096;
+    --wc-text-faint: #94a3b8;
+    --wc-text-active: #0060b0;
+    --wc-text-danger: #c62828;
+    --wc-text-danger-hover: #b71c1c;
+    --wc-accent: #0078d4;
+    --wc-accent-hover: #005fa3;
+    --wc-ok: #2e7d32;
+    --wc-warn: #c86a00;
+    --wc-error: #c62828;
+    --wc-test-ok-bg: #e8f5e9;
+    --wc-test-ok-border: #66bb6a;
+    --wc-test-ok-text: #2e7d32;
+    --wc-test-err-bg: #ffebee;
+    --wc-test-err-border: #ef9a9a;
+    --wc-test-err-text: #c62828;
+    --wc-banner-update-bg: #e8f5e9;
+    --wc-banner-update-border: #81c784;
+    --wc-banner-update-text: #1b5e20;
+    --wc-banner-update-link: #2e7d32;
+    --wc-banner-update-link-hover: #1b5e20;
+    --wc-banner-api-bg: #fff3e0;
+    --wc-banner-api-border: #ffb74d;
+    --wc-banner-api-text: #e65100;
+    --wc-banner-api-link: #bf360c;
+    --wc-banner-api-link-hover: #870000;
+    --wc-scrollbar: #b8bcc8;
+    --wc-scrollbar-hover: #9498a4;
+    --wc-art-bg: #dde1ea;
+    --wc-art-placeholder: #a0a8b0;
+    --wc-progress-bg: #d4d8e2;
+  }
+}
+
+/* ── Explicit light override ────────────────────────────────────────────── */
+html[data-theme="light"] {
+  color-scheme: light;
+  --wc-bg: #f0f2f5;
+  --wc-bg-sidebar: #e4e6ee;
+  --wc-bg-surface: #ffffff;
+  --wc-bg-surface-2: #eef1f8;
+  --wc-bg-input: #ffffff;
+  --wc-bg-hover: #e6e9f0;
+  --wc-bg-active: #cde4ff;
+  --wc-bg-active-hover: #b5d4ff;
+  --wc-bg-btn-secondary: #dde1ed;
+  --wc-bg-btn-secondary-hover: #ccd0e0;
+  --wc-bg-danger: #fff0f0;
+  --wc-bg-danger-hover: #ffe0e0;
+  --wc-border: #cdd1dd;
+  --wc-border-subtle: #dde0ea;
+  --wc-border-focus: #0078d4;
+  --wc-border-danger: #e53935;
+  --wc-text: #1a1a2e;
+  --wc-text-heading: #0d0d1a;
+  --wc-text-secondary: #4a5568;
+  --wc-text-muted: #718096;
+  --wc-text-faint: #94a3b8;
+  --wc-text-active: #0060b0;
+  --wc-text-danger: #c62828;
+  --wc-text-danger-hover: #b71c1c;
+  --wc-accent: #0078d4;
+  --wc-accent-hover: #005fa3;
+  --wc-ok: #2e7d32;
+  --wc-warn: #c86a00;
+  --wc-error: #c62828;
+  --wc-test-ok-bg: #e8f5e9;
+  --wc-test-ok-border: #66bb6a;
+  --wc-test-ok-text: #2e7d32;
+  --wc-test-err-bg: #ffebee;
+  --wc-test-err-border: #ef9a9a;
+  --wc-test-err-text: #c62828;
+  --wc-banner-update-bg: #e8f5e9;
+  --wc-banner-update-border: #81c784;
+  --wc-banner-update-text: #1b5e20;
+  --wc-banner-update-link: #2e7d32;
+  --wc-banner-update-link-hover: #1b5e20;
+  --wc-banner-api-bg: #fff3e0;
+  --wc-banner-api-border: #ffb74d;
+  --wc-banner-api-text: #e65100;
+  --wc-banner-api-link: #bf360c;
+  --wc-banner-api-link-hover: #870000;
+  --wc-scrollbar: #b8bcc8;
+  --wc-scrollbar-hover: #9498a4;
+  --wc-art-bg: #dde1ea;
+  --wc-art-placeholder: #a0a8b0;
+  --wc-progress-bg: #d4d8e2;
+}

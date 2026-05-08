@@ -18,6 +18,9 @@ const DIAGNOSTICS_ENABLED_KEY = 'diagnostics_enabled';
 const LIVE_SHOW_HIDDEN_KEY = 'live_show_hidden_channels';
 const KEYBINDINGS_KEY = 'player_keybindings';
 const SKIP_INTERVALS_KEY = 'player_skip_intervals';
+const THEME_KEY = 'app_theme';
+
+export type AppTheme = 'system' | 'dark' | 'light';
 
 // Reasonable defaults for keybindings and skip intervals
 export const DEFAULT_KEYBINDINGS = {
@@ -153,6 +156,9 @@ export interface AppState {
   showHiddenLiveChannels: boolean;
   setShowHiddenLiveChannels: (value: boolean) => void;
 
+  theme: AppTheme;
+  setTheme: (theme: AppTheme) => void;
+
   // Currently playing item – fileId drives the VideoPlayer
   nowPlayingId: string | null;
   nowPlayingKey: number;            // increments on every playItem call so the effect re-fires even for the same id
@@ -188,6 +194,12 @@ function loadSkipIntervals(): SkipIntervalsConfig {
     if (raw) return { ...DEFAULT_SKIP_INTERVALS, ...JSON.parse(raw) };
   } catch {}
   return { ...DEFAULT_SKIP_INTERVALS };
+}
+
+function loadTheme(): AppTheme {
+  const raw = (localStorage.getItem(THEME_KEY) ?? '').trim();
+  if (raw === 'dark' || raw === 'light' || raw === 'system') return raw;
+  return 'system';
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -402,6 +414,12 @@ export const useStore = create<AppState>((set) => ({
   setShowHiddenLiveChannels: (value: boolean) => {
     localStorage.setItem(LIVE_SHOW_HIDDEN_KEY, String(value));
     set({ showHiddenLiveChannels: value });
+  },
+
+  theme: loadTheme(),
+  setTheme: (theme: AppTheme) => {
+    localStorage.setItem(THEME_KEY, theme);
+    set({ theme });
   },
 
   nowPlayingId: null,

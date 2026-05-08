@@ -75,9 +75,9 @@
 }
 
 .video-error__close {
-  background: #2a2a3a;
-  border: 1px solid #444;
-  color: #ddd;
+  background: var(--wc-bg-btn-secondary);
+  border: 1px solid var(--wc-border-subtle);
+  color: var(--wc-text);
   padding: 8px 24px;
   border-radius: 6px;
   cursor: pointer;
@@ -87,7 +87,7 @@
 }
 
 .video-error__close:hover {
-  background: #3a3a4a;
+  background: var(--wc-bg-btn-secondary-hover);
 }
 
 .video-header__controls {

@@ -12,6 +12,20 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.5.0
+
+### 2026-05-07 - Theme support: System, Dark, Light
+
+- Request: add theme selection to Settings, including a system default option that follows OS preference.
+- Rationale: dark-only UI excluded users who prefer light mode or rely on OS-level accessibility settings.
+- Solution:
+  - Created `src/themes.css` defining ~40 `--wc-*` CSS custom properties for dark (default) and light variants, plus a `@media (prefers-color-scheme: light)` block for the system auto case.
+  - Converted all six CSS files (`reset.css`, `App.css`, `Sidebar.css`, `MediaCard.css`, `Page.css`, `VideoPlayer.css`) from hardcoded hex values to `var(--wc-*)` references.
+  - Added `AppTheme = 'system' | 'dark' | 'light'` type, `theme` state, and `setTheme` action to `useStore.ts` with localStorage persistence under key `app_theme`.
+  - `App.tsx` applies `data-theme="dark"` or `data-theme="light"` to `<html>` when an explicit theme is chosen; removes the attribute for system auto so the CSS media query resolves it.
+  - Added an Appearance section at the top of Settings with three styled radio buttons (System default / Dark / Light).
+- Validation: TypeScript diagnostics clean; production build succeeded.
+
 ## v1.4.1
 
 ### 2026-05-03 - Auto-focus first episode card when TV show is selected

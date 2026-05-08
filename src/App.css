@@ -3,8 +3,8 @@
   font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
-  color: #d4d4d4;
-  background-color: #12121e;
+  color: var(--wc-text);
+  background-color: var(--wc-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -17,7 +17,7 @@
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: #12121e;
+  background: var(--wc-bg);
 }
 
 .app-main {
@@ -33,7 +33,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--wc-text-faint);
   font-size: 13px;
   letter-spacing: 0.04em;
 }
@@ -41,9 +41,9 @@
 /* ── App update banner ─────────────────────────────────────────────────── */
 
 .app-update-banner {
-  background: #12301f;
-  border-bottom: 1px solid #2f6f4a;
-  color: #b3f3cb;
+  background: var(--wc-banner-update-bg);
+  border-bottom: 1px solid var(--wc-banner-update-border);
+  color: var(--wc-banner-update-text);
   font-size: 12px;
   padding: 7px 14px;
   display: flex;
@@ -54,22 +54,22 @@
 }
 
 .app-update-banner__link {
-  color: #8ce7b3;
+  color: var(--wc-banner-update-link);
   text-decoration: underline;
   white-space: nowrap;
   font-weight: 600;
 }
 
 .app-update-banner__link:hover {
-  color: #b3ffd3;
+  color: var(--wc-banner-update-link-hover);
 }
 
 /* ── API version change banner ──────────────────────────────────────────── */
 
 .api-version-banner {
-  background: #3a1a00;
-  border-bottom: 1px solid #7a3800;
-  color: #ffc07a;
+  background: var(--wc-banner-api-bg);
+  border-bottom: 1px solid var(--wc-banner-api-border);
+  color: var(--wc-banner-api-text);
   font-size: 12px;
   padding: 7px 14px;
   display: flex;
@@ -79,13 +79,13 @@
 }
 
 .api-version-banner__link {
-  color: #ff8c30;
+  color: var(--wc-banner-api-link);
   text-decoration: underline;
   white-space: nowrap;
   font-weight: 600;
 }
 
 .api-version-banner__link:hover {
-  color: #ffaa60;
+  color: var(--wc-banner-api-link-hover);
 }
 

@@ -61,11 +61,22 @@ async function fetchLatestRelease(): Promise<UpdateInfo | null> {
 }
 
 function App() {
-  const { activeServerId, serverChangeVersion, probeActiveServer, apiVersionApproved } = useStore();
+  const { activeServerId, serverChangeVersion, probeActiveServer, apiVersionApproved, theme } = useStore();
   useKeyboardNav();
   const [probing, setProbing] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const didCheckUpdateRef = useRef(false);
+
+  // Apply theme data attribute to <html> element.
+  // 'system' removes the attribute so the CSS media query handles OS preference.
+  useEffect(() => {
+    const html = document.documentElement;
+    if (theme === 'system') {
+      html.removeAttribute('data-theme');
+    } else {
+      html.dataset.theme = theme;
+    }
+  }, [theme]);
 
   // On startup and whenever the active server changes, probe the LAN URL and
   // automatically fall back to the Tailscale URL if the LAN is unreachable.

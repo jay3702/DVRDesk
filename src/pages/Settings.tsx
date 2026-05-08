@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useStore, type ServerOption, DEFAULT_KEYBINDINGS, DEFAULT_SKIP_INTERVALS, type KeybindingsConfig, type SkipIntervalsConfig } from '../store/useStore';
+import { useStore, type ServerOption, DEFAULT_KEYBINDINGS, DEFAULT_SKIP_INTERVALS, type KeybindingsConfig, type SkipIntervalsConfig, type AppTheme } from '../store/useStore';
 import {
   fetchCompatibilityMatrix,
   fetchServerVersionInfo,
@@ -171,6 +171,8 @@ export default function Settings() {
     setKeybindings,
     skipIntervals,
     setSkipIntervals,
+    theme,
+    setTheme,
   } = useStore();
 
   const [draftServers, setDraftServers] = useState<ServerOption[]>(servers);
@@ -423,6 +425,29 @@ export default function Settings() {
       </header>
 
       <div className="settings-form">
+        <section className="settings-section">
+          <h2 className="settings-section__title">Appearance</h2>
+          <div className="settings-theme-options">
+            {(['system', 'dark', 'light'] as AppTheme[]).map((t) => (
+              <label key={t} className="settings-theme-option">
+                <input
+                  type="radio"
+                  name="app-theme"
+                  value={t}
+                  checked={theme === t}
+                  onChange={() => setTheme(t)}
+                />
+                <span>
+                  {t === 'system' ? 'System default' : t.charAt(0).toUpperCase() + t.slice(1)}
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="settings-hint">
+            <em>System default</em> follows your operating system&apos;s light or dark preference.
+          </p>
+        </section>
+
         <section className="settings-section">
           <h2 className="settings-section__title">Servers</h2>
           <table className="settings-table" aria-label="Configured DVR servers">

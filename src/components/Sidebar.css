@@ -1,8 +1,8 @@
 .sidebar {
   width: 180px;
   min-width: 180px;
-  background: #141420;
-  border-right: 1px solid #2a2a3a;
+  background: var(--wc-bg-sidebar);
+  border-right: 1px solid var(--wc-border);
   display: flex;
   flex-direction: column;
   padding-top: 0;
@@ -12,15 +12,15 @@
 .sidebar__brand {
   font-size: 16px;
   font-weight: 700;
-  color: #0078d4;
+  color: var(--wc-accent);
   padding: 20px 16px 16px;
   letter-spacing: -0.3px;
-  border-bottom: 1px solid #2a2a3a;
+  border-bottom: 1px solid var(--wc-border);
 }
 
 .sidebar__server-picker {
   padding: 12px 12px 8px;
-  border-bottom: 1px solid #2a2a3a;
+  border-bottom: 1px solid var(--wc-border);
 }
 
 .sidebar__server-label {
@@ -29,15 +29,15 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #7d8699;
+  color: var(--wc-text-secondary);
   margin-bottom: 6px;
 }
 
 .sidebar__server-select {
   width: 100%;
-  background: #1d2230;
-  border: 1px solid #354055;
-  color: #d0d7e6;
+  background: var(--wc-bg-input);
+  border: 1px solid var(--wc-border);
+  color: var(--wc-text);
   border-radius: 6px;
   padding: 7px 8px;
   font-size: 12px;
@@ -45,7 +45,7 @@
 
 .sidebar__server-select:focus {
   outline: none;
-  border-color: #60b0f0;
+  border-color: var(--wc-border-focus);
 }
 
 .sidebar__nav {
@@ -60,7 +60,7 @@
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  color: #a0a0b0;
+  color: var(--wc-text-secondary);
   text-decoration: none;
   font-size: 13px;
   border-radius: 6px;
@@ -69,18 +69,18 @@
 }
 
 .sidebar__link:hover {
-  background: #1e1e30;
-  color: #d4d4d4;
+  background: var(--wc-bg-hover);
+  color: var(--wc-text);
 }
 
 .sidebar__link:focus-visible {
-  outline: 2px solid #0078d4;
+  outline: 2px solid var(--wc-accent);
   outline-offset: -2px;
 }
 
 .sidebar__link--active {
-  background: #1a3a5c;
-  color: #60b0f0;
+  background: var(--wc-bg-active);
+  color: var(--wc-text-active);
   font-weight: 600;
 }
 

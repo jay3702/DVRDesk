@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { installClientErrorLogging } from "./lib/clientErrorLog";
+import "./themes.css";
 import "./reset.css";
 
 installClientErrorLogging();

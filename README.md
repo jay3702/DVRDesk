@@ -163,6 +163,73 @@ If both are available, you can switch between them from the player controls.
 - HLS.js for playback
 - Tauri HTTP plugin for API requests
 
+## Release History
+
+### v1.0.0 (2026-04-14)
+Initial release: Recent Recordings, TV Shows, Movies, Library browsing, HLS playback with broadcast and SRT sidecar captions, multi-server support, and Settings.
+
+### v1.1.0 (2026-04-15)
+Live TV view with channel browsing, per-source and Favorites filters, deduplication, and click-to-play; source diagnostics matrix for troubleshooting.
+Player "Stats for Nerds" live diagnostics overlay (toggled with Shift+S); Windows ARM64 installer added to releases.
+
+### v1.1.1 (2026-04-15)
+Fixed duplicate channels appearing in the Live Favorites filter when a channel was present across multiple tuner sources.
+
+### v1.1.8 (2026-04-16)
+Hidden channels toggle in Live TV (Settings → Live TV → Show hidden channels) to suppress source-hidden and duplicate feeds.
+Linux x64 and ARM64 build pipeline added; CI and release workflow reliability fixes across v1.1.2–v1.1.8.
+
+### v1.1.9 (2026-04-17)
+Version bump to include the hidden-channel setting in a properly tagged release; no additional user-facing changes.
+
+### v1.2.0 (2026-04-20)
+Tailscale dual-address support — app probes LAN on startup and falls back to Tailscale automatically; TV Shows redesigned to a two-level flow (show → episode detail).
+Trash and Mark as Not Recorded actions added to episode and recording detail panes; API version guard with a persistent banner warning when the server version changes; badge indicators restored on episode and movie cards.
+
+### v1.2.1 (2026-04-21)
+"Mark as Not Recorded" action is now hidden for recordings that have no associated DVR rule, where the action would have no effect.
+
+### v1.2.2 (2026-04-21)
+Sort toggle buttons (▲/▼) replace dropdowns across TV Shows and Movies; fixed Live TV heading wrapping when many source filter chips are present.
+
+### v1.3.0 (2026-04-22)
+New cross-library Search page with type filters (Any, Title, Summary, Series Name) and direct navigation to matching recordings, shows, movies, and library videos.
+Recording file path shown in episode and movie detail panes; sort direction overhaul with stacked ▲/▼ buttons and a Date Updated field option.
+
+### v1.3.1 (2026-04-23)
+Cache-first page revisits for all views (Live, TV Shows, Movies, Recent Recordings) so returning to a page renders instantly from cache while a background refresh runs.
+Progressive list rendering for large libraries; persisted sort selections with field-based default direction; resizable split-view panels for TV Shows and Library; Last Recorded sort option for TV shows.
+
+### v1.3.2 (2026-04-23)
+CI fix: removed unused state variable in `RecentRecordings` that caused TypeScript strict-mode errors and blocked all platform builds after v1.3.1.
+
+### v1.3.3 (2026-04-23)
+Fixed progressive list rendering not triggering additional scroll-fill when all initial items fit in view without producing a scrollbar.
+
+### v1.3.4 (2026-04-23)
+Added TV shows sort option for Last Recorded (by `last_recorded_at`).
+
+### v1.3.5 (2026-04-23)
+Made Last Recorded the default sort order for the TV shows list.
+
+### v1.3.6 (2026-04-24)
+Added startup check for newer WinChannels releases; a banner appears when a newer version is available on GitHub.
+
+### v1.3.7 (2026-04-25)
+Repository-hosted API compatibility matrix replaces local approval state; improved server version detection with status endpoint fallbacks; clearer per-server compatibility messaging in Settings.
+
+### v1.3.8 (2026-04-26)
+Local bug report composer with a persistent 48-hour client error log; server IPs are redacted and replaced with configured server names in reports; connection test runs automatically when the bug report is opened.
+
+### v1.3.9 (2026-04-26)
+Fixed infinite probe loop caused by Tailscale fallback incorrectly incrementing the server change version.
+
+### v1.4.0 (2026-05-03)
+Auto-focus the first episode card when a TV show is selected, enabling keyboard navigation without a manual click.
+
+### v1.4.1 (2026-05-05)
+Full keyboard D-pad navigation across sidebar, list, and grid zones; configurable player keybindings and skip intervals in Settings.
+
 ## License
 
 [MIT](LICENSE)
