@@ -238,6 +238,15 @@ export default function RecentRecordings() {
                         key={rec.id}
                         className={`rec-item ${selected?.id === rec.id ? 'rec-item--active' : ''}`}
                         onClick={() => selectRecording(rec)}
+                        onDoubleClick={() => playItem(
+                          rec.id,
+                          recLabel(rec),
+                          rec.path,
+                          rec.commercials,
+                          '',
+                          rec.playback_time,
+                          rec.show_id ? 'episode' : 'movie'
+                        )}
                       >
                         {logoUrl && (
                           <img

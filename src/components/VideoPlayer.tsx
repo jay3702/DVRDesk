@@ -207,6 +207,8 @@ export default function VideoPlayer() {
   const [lastMutationDebug, setLastMutationDebug] = useState<string>('n/a');
   const [lastMutationFailure, setLastMutationFailure] = useState<string>('n/a');
   const [isOverlayFullscreen, setIsOverlayFullscreen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captionModeRef = useRef<CaptionMode>('off');
   const hasAppliedResumeRef = useRef(false);
   const hasMarkedWatchedRef = useRef(false);
@@ -364,6 +366,20 @@ export default function VideoPlayer() {
     const id = window.setInterval(updateStats, 1000);
     return () => window.clearInterval(id);
   }, [diagnosticsEnabled, nowPlayingId, nowPlayingManifestUrl]);
+
+  // Auto-hide controls after inactivity; reset on mouse movement
+  const resetHideTimer = useCallback(() => {
+    if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+    setControlsVisible(true);
+    hideTimerRef.current = window.setTimeout(() => setControlsVisible(false), 3000);
+  }, []);
+
+  useEffect(() => {
+    resetHideTimer();
+    return () => {
+      if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+    };
+  }, [nowPlayingKey, resetHideTimer]);
 
   // Unified skip/seek function
   const skipBy = useCallback((delta: number) => {
@@ -857,7 +873,12 @@ export default function VideoPlayer() {
   if (!nowPlayingId) return null;
 
   return (
-    <div className="video-overlay" ref={overlayRef} tabIndex={0}>
+    <div
+      className={`video-overlay${controlsVisible ? '' : ' video-overlay--controls-hidden'}`}
+      ref={overlayRef}
+      tabIndex={0}
+      onMouseMove={resetHideTimer}
+    >
       <div className="video-header">
         <span className="video-title">{nowPlayingTitle}</span>
         <div className="video-header__controls">

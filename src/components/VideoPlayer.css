@@ -19,6 +19,7 @@
   background: rgba(0, 0, 0, 0.8);
   color: #fff;
   flex-shrink: 0;
+  transition: opacity 0.3s ease;
 }
 
 .video-title {
@@ -46,7 +47,9 @@
 
 .video-element {
   flex: 1;
+  min-height: 0;
   width: 100%;
+  object-fit: contain;
   background: #000;
   outline: none;
 }
@@ -195,6 +198,17 @@
   background: #1a1a1a;
   flex-shrink: 0;
   border-bottom: 1px solid #111;
+  transition: opacity 0.3s ease;
+}
+
+.video-overlay--controls-hidden {
+  cursor: none;
+}
+
+.video-overlay--controls-hidden .video-header,
+.video-overlay--controls-hidden .video-ad-bar {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .video-ad-segment {

@@ -12,6 +12,19 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.6.0
+
+### 2026-05-08 - Double-click to play, auto-hide controls, fullscreen aspect ratio fix
+
+- Request: double-click a recording in Recent Recordings to play directly; auto-hide player controls after a few seconds of inactivity; fix fullscreen video clipping on ultrawide monitors.
+- Rationale: two-click-to-play was friction for mouse users; persistent controls obstruct the video; custom fullscreen on 32:9 screens clipped the bottom of 16:9 content.
+- Solution:
+  - `RecentRecordings.tsx`: added `onDoubleClick` to each list item button that calls `playItem()` directly, bypassing the detail pane.
+  - `VideoPlayer.tsx`: added `controlsVisible` state and `resetHideTimer` callback; mouse movement on the overlay resets a 3-second inactivity timer; `video-overlay--controls-hidden` class applied when timer fires.
+  - `VideoPlayer.css`: added `transition: opacity 0.3s ease` to `.video-header` and `.video-ad-bar`; `.video-overlay--controls-hidden` fades them out (`opacity: 0; pointer-events: none`) and sets `cursor: none`.
+  - `VideoPlayer.css`: added `min-height: 0` and `object-fit: contain` to `.video-element` so the video is letterboxed within its flex container instead of overflowing on non-16:9 displays.
+- Validation: TypeScript diagnostics clean; dev build running.
+
 ## v1.5.0
 
 ### 2026-05-07 - Theme support: System, Dark, Light
