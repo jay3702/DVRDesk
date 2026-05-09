@@ -239,6 +239,9 @@ Double-click a recording in Recent Recordings to play directly; player controls 
 ### v1.7.0 (2026-05-08)
 Episode sort by Season/Episode number and First Aired date added to TV Shows; Release Date sort added to Movies.
 
+### v1.8.0 (2026-05-09)
+Fixed SRT sidecar caption path construction on Linux; POSIX-style share paths (e.g. `/mnt/channels/Channels`) now use forward slashes instead of backslashes.
+
 ## License
 
 [MIT](LICENSE)

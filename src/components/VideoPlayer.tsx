@@ -598,9 +598,16 @@ export default function VideoPlayer() {
               if (dvrStorageRoot && relPath.startsWith(dvrStorageRoot)) {
                 relPath = relPath.slice(dvrStorageRoot.length);
               }
-              const rel = relPath.replace(/^[\/\\]+/, '').replace(/\//g, '\\').replace(/\.[^.\\]+$/, '.srt');
+              // Detect path style from the configured share path: POSIX if it
+              // starts with '/', Windows (UNC or drive-letter) otherwise.
+              const isUnixStyle = storageSharePath.startsWith('/');
+              const sep = isUnixStyle ? '/' : '\\';
+              const rel = relPath
+                .replace(/^[\/\\]+/, '')
+                .replace(isUnixStyle ? /\\/g : /\//g, sep)
+                .replace(/\.[^./\\]+$/, '.srt');
               const base = storageSharePath.replace(/[/\\]+$/, '');
-              const srtPath = `${base}\\${rel}`;
+              const srtPath = `${base}${sep}${rel}`;
               (invoke('read_text_file', { path: srtPath }) as Promise<string>)
                 .then((srt) => {
                   if (cancelled) return;

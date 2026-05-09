@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.8.0
+
+### 2026-05-09 - Fix SRT path construction on Linux/POSIX share paths
+
+- Request: SRT sidecar captions failed on Ubuntu with "Invalid argument (os error 22)".
+- Symptoms: console showed path like `/mnt/channels/Channels\\TV\\Show\\ep.srt` — POSIX base path joined with Windows backslash separators.
+- Root cause: `VideoPlayer.tsx` always used `\\` as the path separator and called `.replace(/\//g, '\\')` on the relative portion, regardless of OS.
+- Solution: detect path style from `storageSharePath` (POSIX if it starts with `/`, Windows UNC/drive-letter otherwise); use the appropriate separator and normalization throughout.
+- Validation: TypeScript diagnostics clean.
+
 ## v1.7.0
 
 ### 2026-05-08 - Episode sort by Season/Episode and First Aired; Movie sort by Release Date
