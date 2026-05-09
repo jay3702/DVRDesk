@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.7.0
+
+### 2026-05-08 - Episode sort by Season/Episode and First Aired; Movie sort by Release Date
+
+- Request: add Season/Episode and First Aired sort options for TV show episodes; add Release Date sort for movies.
+- Solution:
+  - `TVShows.tsx`: added `'season-episode'` and `'air-date'` to `EpisodeSortField`; `season-episode` sorts by `season_number` then `episode_number`; `air-date` sorts by `original_air_date` (ISO string, lexicographic); episodes with no air date sort last; both default to ascending. Updated localStorage validator and `defaultOrderFor`.
+  - `Movies.tsx`: added `'release-date'` to `SortField`; sorts by `release_date` (ISO string) falling back to `release_year` as a string; movies with neither field sort last; defaults to ascending. Updated localStorage validator and `defaultOrderFor`.
+- Validation: TypeScript diagnostics clean.
+
 ## v1.6.0
 
 ### 2026-05-08 - Double-click to play, auto-hide controls, fullscreen aspect ratio fix

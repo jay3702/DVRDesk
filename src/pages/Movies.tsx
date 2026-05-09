@@ -6,7 +6,7 @@ import MediaCard from '../components/MediaCard';
 import { useStore } from '../store/useStore';
 import './Page.css';
 
-type SortField = 'title' | 'id' | 'date-added' | 'date-updated';
+type SortField = 'title' | 'id' | 'date-added' | 'date-updated' | 'release-date';
 const INITIAL_VISIBLE_MOVIES = 120;
 const VISIBLE_MOVIES_STEP = 80;
 const MOVIES_SORT_STATE_KEY = 'winchannels_movies_sort_state_v1';
@@ -14,7 +14,8 @@ const MOVIES_SORT_STATE_KEY = 'winchannels_movies_sort_state_v1';
 const moviesCache = new Map<string, Movie[]>();
 
 function defaultOrderFor(field: SortField): 'asc' | 'desc' {
-  return field === 'title' ? 'asc' : 'desc';
+  if (field === 'title' || field === 'release-date') return 'asc';
+  return 'desc';
 }
 
 function loadMoviesSortState(): { sort: SortField; sortOrder: 'asc' | 'desc' } {
@@ -22,7 +23,7 @@ function loadMoviesSortState(): { sort: SortField; sortOrder: 'asc' | 'desc' } {
     const raw = localStorage.getItem(MOVIES_SORT_STATE_KEY);
     if (!raw) return { sort: 'date-added', sortOrder: defaultOrderFor('date-added') };
     const parsed = JSON.parse(raw) as Partial<{ sort: SortField; sortOrder: 'asc' | 'desc' }>;
-    const sort = parsed.sort === 'title' || parsed.sort === 'id' || parsed.sort === 'date-added' || parsed.sort === 'date-updated'
+    const sort = parsed.sort === 'title' || parsed.sort === 'id' || parsed.sort === 'date-added' || parsed.sort === 'date-updated' || parsed.sort === 'release-date'
       ? parsed.sort
       : 'date-added';
     return {
@@ -161,6 +162,17 @@ export default function Movies() {
       case 'date-updated':
         list.sort((a, b) => (a.updated_at ?? 0) - (b.updated_at ?? 0));
         break;
+      case 'release-date':
+        list.sort((a, b) => {
+          // Prefer release_date (ISO string); fall back to release_year as a string
+          const ad = a.release_date ?? (a.release_year != null ? String(a.release_year) : '');
+          const bd = b.release_date ?? (b.release_year != null ? String(b.release_year) : '');
+          if (!ad && !bd) return 0;
+          if (!ad) return 1;
+          if (!bd) return -1;
+          return ad.localeCompare(bd);
+        });
+        break;
     }
     if (sortOrder === 'desc') list.reverse();
     return list;
@@ -245,10 +257,11 @@ export default function Movies() {
             }}
             aria-label="Sort movies"
           >
-            <option value="title">Title</option>
-            <option value="id">ID</option>
+            <option value="release-date">Release Date</option>
             <option value="date-added">Date Added</option>
             <option value="date-updated">Date Updated</option>
+            <option value="title">Title</option>
+            <option value="id">ID</option>
           </select>
           <div className="page-sort-order-stack" role="group" aria-label="Movie sort direction">
             <button

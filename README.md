@@ -230,6 +230,15 @@ Auto-focus the first episode card when a TV show is selected, enabling keyboard 
 ### v1.4.1 (2026-05-05)
 Full keyboard D-pad navigation across sidebar, list, and grid zones; configurable player keybindings and skip intervals in Settings.
 
+### v1.5.0 (2026-05-07)
+System/Dark/Light theme support with a CSS custom property system; theme selector in Settings under a new Appearance section; theme persisted across sessions.
+
+### v1.6.0 (2026-05-08)
+Double-click a recording in Recent Recordings to play directly; player controls (header bar and commercial timeline) auto-hide after 3 seconds of inactivity and reappear on mouse movement; fixed fullscreen video clipping on ultrawide monitors.
+
+### v1.7.0 (2026-05-08)
+Episode sort by Season/Episode number and First Aired date added to TV Shows; Release Date sort added to Movies.
+
 ## License
 
 [MIT](LICENSE)

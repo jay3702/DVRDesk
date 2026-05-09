@@ -9,7 +9,7 @@ import { useStore } from '../store/useStore';
 import './Page.css';
 
 type ShowSortField = 'title' | 'id' | 'date-added' | 'date-updated' | 'last-recorded';
-type EpisodeSortField = 'title' | 'id' | 'date-added' | 'date-updated';
+type EpisodeSortField = 'title' | 'id' | 'date-added' | 'date-updated' | 'season-episode' | 'air-date';
 const INITIAL_VISIBLE_SHOWS = 90;
 const VISIBLE_SHOWS_STEP = 60;
 const TV_SHOWS_SORT_STATE_KEY = 'winchannels_tvshows_sort_state_v1';
@@ -17,7 +17,8 @@ const TV_SHOWS_SORT_STATE_KEY = 'winchannels_tvshows_sort_state_v1';
 const tvShowsCache = new Map<string, Show[]>();
 
 function defaultOrderFor(field: ShowSortField | EpisodeSortField): 'asc' | 'desc' {
-  return field === 'title' ? 'asc' : 'desc';
+  if (field === 'title' || field === 'season-episode' || field === 'air-date') return 'asc';
+  return 'desc';
 }
 
 function loadTvShowsSortState(): {
@@ -45,7 +46,7 @@ function loadTvShowsSortState(): {
     const isShowField = (value: unknown): value is ShowSortField =>
       value === 'title' || value === 'id' || value === 'date-added' || value === 'date-updated' || value === 'last-recorded';
     const isEpisodeField = (value: unknown): value is EpisodeSortField =>
-      value === 'title' || value === 'id' || value === 'date-added' || value === 'date-updated';
+      value === 'title' || value === 'id' || value === 'date-added' || value === 'date-updated' || value === 'season-episode' || value === 'air-date';
     const showSort = isShowField(parsed.showSort) ? parsed.showSort : 'last-recorded';
     const episodeSort = isEpisodeField(parsed.episodeSort) ? parsed.episodeSort : 'date-added';
     return {
@@ -243,6 +244,23 @@ export default function TVShows() {
         break;
       case 'date-updated':
         list.sort((a, b) => (a.updated_at ?? 0) - (b.updated_at ?? 0));
+        break;
+      case 'season-episode':
+        list.sort((a, b) => {
+          const sd = (a.season_number ?? 0) - (b.season_number ?? 0);
+          if (sd !== 0) return sd;
+          return (a.episode_number ?? 0) - (b.episode_number ?? 0);
+        });
+        break;
+      case 'air-date':
+        list.sort((a, b) => {
+          const ad = a.original_air_date ?? '';
+          const bd = b.original_air_date ?? '';
+          if (!ad && !bd) return 0;
+          if (!ad) return 1;
+          if (!bd) return -1;
+          return ad.localeCompare(bd);
+        });
         break;
     }
     if (episodeSortOrder === 'desc') list.reverse();
@@ -521,10 +539,12 @@ export default function TVShows() {
                   }}
                   aria-label="Sort episodes"
                 >
-                  <option value="title">Title</option>
-                  <option value="id">ID</option>
+                  <option value="season-episode">Season / Episode</option>
+                  <option value="air-date">First Aired</option>
                   <option value="date-added">Date Added</option>
                   <option value="date-updated">Date Updated</option>
+                  <option value="title">Title</option>
+                  <option value="id">ID</option>
                 </select>
                 <div className="page-sort-order-stack" role="group" aria-label="Episode sort direction">
                   <button
