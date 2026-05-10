@@ -1,6 +1,6 @@
 # WinChannels
 
-WinChannels is a native Windows desktop client for Channels DVR.
+WinChannels is a native Windows and Linux desktop client for Channels DVR.
 
 ## Positioning
 
