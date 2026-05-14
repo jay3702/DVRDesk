@@ -239,6 +239,9 @@ Double-click a recording in Recent Recordings to play directly; player controls 
 ### v1.7.0 (2026-05-08)
 Episode sort by Season/Episode number and First Aired date added to TV Shows; Release Date sort added to Movies.
 
+### v1.9.0 (2026-05-13)
+Live TV HLS improvements: `encoder=remux` no longer applied to live channel streams (it only applies to DVR file playback); live manifest resolution now prefers `/hls/master.m3u8` over bare `/hls`; URL probe switched to HEAD requests to avoid prematurely initiating a transcoding session on Channels DVR.
+
 ### v1.8.0 (2026-05-09)
 Fixed SRT sidecar caption path construction on Linux; POSIX-style share paths (e.g. `/mnt/channels/Channels`) now use forward slashes instead of backslashes.
 

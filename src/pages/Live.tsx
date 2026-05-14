@@ -242,17 +242,17 @@ function candidateLiveManifestUrls(channel: Channel): string[] {
   const sourceId = encodeURIComponent(channel.source_id || '');
 
   const guessed = [
-    // Match Channels Web UI play URLs first.
-    `${server}/devices/ANY/channels/${number}/hls`,
-    sourceId ? `${server}/devices/${sourceId}/channels/${number}/hls` : '',
-    // Also support id-based channel addressing where present.
-    `${server}/devices/ANY/channels/${id}/hls`,
-    sourceId ? `${server}/devices/${sourceId}/channels/${id}/hls` : '',
-    // Some servers expect explicit master playlist path.
+    // Prefer explicit master playlist — this triggers a full multi-quality
+    // transcode session on Channels DVR rather than a fixed low-quality stream.
     `${server}/devices/ANY/channels/${number}/hls/master.m3u8`,
     sourceId ? `${server}/devices/${sourceId}/channels/${number}/hls/master.m3u8` : '',
     `${server}/devices/ANY/channels/${id}/hls/master.m3u8`,
     sourceId ? `${server}/devices/${sourceId}/channels/${id}/hls/master.m3u8` : '',
+    // Fallback to bare /hls path (some servers, single-quality stream).
+    `${server}/devices/ANY/channels/${number}/hls`,
+    sourceId ? `${server}/devices/${sourceId}/channels/${number}/hls` : '',
+    `${server}/devices/ANY/channels/${id}/hls`,
+    sourceId ? `${server}/devices/${sourceId}/channels/${id}/hls` : '',
   ];
 
   const unique: string[] = [];
@@ -269,19 +269,31 @@ async function resolveLiveManifestUrl(channel: Channel): Promise<string> {
   // In browser-only dev, prefer first candidate to avoid CORS probe failures.
   if (!window.__TAURI_INTERNALS__) return candidates[0];
 
+  // Use the Tauri HTTP plugin (same stack as HLS.js) with HEAD requests so we
+  // can validate the URL without downloading a body — a GET probe would initiate
+  // a transcoding session on Channels DVR before HLS.js connects, potentially
+  // locking the stream into a low-quality profile.
+  const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+
   for (const url of candidates) {
     try {
-      const res = await fetch(url, {
-        method: 'GET',
+      const res = await tauriFetch(url, {
+        method: 'HEAD',
         headers: {
+          'User-Agent': navigator.userAgent,
           Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,text/plain,*/*',
         },
       });
       if (!res.ok) continue;
       const ct = (res.headers.get('content-type') || '').toLowerCase();
-      if (ct.includes('mpegurl')) return url;
-      const text = await res.text();
-      if (text.includes('#EXTM3U')) return url;
+      // Accept any response that looks like an HLS stream or a plausible media type.
+      if (
+        ct.includes('mpegurl') ||
+        ct.includes('m3u8') ||
+        ct.includes('octet-stream') ||
+        ct.includes('video/') ||
+        ct === ''
+      ) return url;
     } catch {
       // Continue trying the next candidate URL.
     }
