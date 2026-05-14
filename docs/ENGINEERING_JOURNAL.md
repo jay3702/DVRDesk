@@ -12,6 +12,21 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.9.0
+
+### 2026-05-13 - Live TV HLS URL and remux improvements
+
+- Request/investigation: CC4C custom channels (e.g. Spectrum via `chrome://`) were streaming at 682x384 / ~160 kbps despite the source being 1920x1080.
+- Symptoms observed:
+  - Stats overlay showed only one quality level at 682x384; Channels DVR log confirmed `resolution=384, bitrate=59` encoder output.
+  - Channels DVR probe reported `h264 1920x1080 progressive 123963bps` input — CC4C was producing a valid 1080p signal but at only ~124 kbps, causing DVR to cap HLS output at 384p.
+  - Root cause on server side: CC4C's Xvfb display was configured at 16-bit color depth (`1920x1080x16`); changing to `x24` allowed Chrome's encoder to produce the full 9.5 Mbps target bitrate.
+- WinChannels code improvements made during investigation:
+  - `encoder=remux` query parameter is no longer appended to live channel URLs (`nowPlayingRecordingKind === null`); remux is only meaningful for DVR file playback, not live HLS streams.
+  - Live manifest URL candidate order changed to prefer `/hls/master.m3u8` over bare `/hls`, ensuring a full multi-variant master playlist is requested.
+  - URL probe in `resolveLiveManifestUrl` switched from browser `fetch` (GET) to Tauri HTTP `HEAD` to avoid initiating a transcoding session on Channels DVR before HLS.js connects.
+- Validation: Stats overlay confirmed 1920x1080 @ 10 Mbps after CC4C container rebuild.
+
 ## v1.8.0
 
 ### 2026-05-09 - Fix SRT path construction on Linux/POSIX share paths

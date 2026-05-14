@@ -488,8 +488,9 @@ export default function VideoPlayer() {
     if (!video || !nowPlayingId) return;
 
     const src = nowPlayingManifestUrl || streamUrl(nowPlayingId);
+    const isLive = !nowPlayingRecordingKind;
     const remuxSrc = withQuery(src, 'encoder', 'remux');
-    activeManifestUrlRef.current = preferRemux ? remuxSrc : src;
+    activeManifestUrlRef.current = (preferRemux && !isLive) ? remuxSrc : src;
 
     if (Hls.isSupported()) {
       let cancelled = false;
@@ -526,7 +527,7 @@ export default function VideoPlayer() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const hls = new Hls(hlsConfig as any);
         hlsRef.current = hls;
-        let usedRemuxManifest = preferRemux;
+        let usedRemuxManifest = preferRemux && !isLive;
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
           console.error('HLS error:', data.type, data.details, data.fatal,
@@ -557,7 +558,7 @@ export default function VideoPlayer() {
           }
         });
 
-        hls.loadSource(preferRemux ? remuxSrc : src);
+        hls.loadSource((preferRemux && !isLive) ? remuxSrc : src);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
           if (!cancelled) {
@@ -846,7 +847,7 @@ export default function VideoPlayer() {
       `Time: ${new Date().toISOString()}`,
       `Title: ${nowPlayingTitle}`,
       `File ID: ${nowPlayingId}`,
-      `Prefer remux: ${preferRemux ? 'on' : 'off'}`,
+      `Prefer remux: ${preferRemux && nowPlayingRecordingKind ? 'on' : nowPlayingRecordingKind ? 'off' : 'n/a (live)'}`,
       `Manifest URL: ${manifest}`,
       `Last mutation endpoint: ${getLastRecordingMutationDebug() ?? 'n/a'}`,
       `Last mutation failure: ${getLastRecordingMutationFailure() ?? 'n/a'}`,
