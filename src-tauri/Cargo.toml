@@ -1,6 +1,6 @@
 [package]
 name = "winchannels"
-version = "1.9.0"
+version = "1.9.1"
 description = "Channels DVR Windows Client"
 authors = ["you"]
 edition = "2021"

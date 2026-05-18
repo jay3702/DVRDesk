@@ -12,20 +12,23 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.9.1
+
+### 2026-05-16 - WinChannels: stop live stream immediately when player is closed
+
+- Request: CC4C stream stays alive after pressing X (closing the player) unless the user changes channels or closes the Tauri app.
+- Root cause: `VideoPlayer` is a persistent overlay (rendered outside `<Routes>` in `App.tsx`); it never unmounts on navigation. The HLS setup `useEffect` has deps `[nowPlayingKey, preferRemux]`. `stopPlayback()` clears `nowPlayingId` but does not change `nowPlayingKey`, so the effect cleanup never ran. HLS.js kept fetching segments from Channels DVR, which held the Channels DVR session (and thus the CC4C ffmpeg pipeline) open until Channels DVR's session inactivity timeout.
+- Solution: added a `useEffect([nowPlayingId])` in `VideoPlayer.tsx` that fires when `nowPlayingId` becomes null (stopPlayback called). It destroys the HLS.js instance and calls `stopLiveDvrSession()`, which fetches `GET /api/v1/sessions`, finds the session matching the channel in the manifest URL, and sends `DELETE /api/v1/sessions/{ID}`. Session termination is best-effort (errors are caught and logged).
+- Validation: TypeScript diagnostics clean.
+
 ## v1.9.0
 
 ### 2026-05-13 - Live TV HLS URL and remux improvements
 
-- Request/investigation: CC4C custom channels (e.g. Spectrum via `chrome://`) were streaming at 682x384 / ~160 kbps despite the source being 1920x1080.
-- Symptoms observed:
-  - Stats overlay showed only one quality level at 682x384; Channels DVR log confirmed `resolution=384, bitrate=59` encoder output.
-  - Channels DVR probe reported `h264 1920x1080 progressive 123963bps` input — CC4C was producing a valid 1080p signal but at only ~124 kbps, causing DVR to cap HLS output at 384p.
-  - Root cause on server side: CC4C's Xvfb display was configured at 16-bit color depth (`1920x1080x16`); changing to `x24` allowed Chrome's encoder to produce the full 9.5 Mbps target bitrate.
-- WinChannels code improvements made during investigation:
+- WinChannels code improvements:
   - `encoder=remux` query parameter is no longer appended to live channel URLs (`nowPlayingRecordingKind === null`); remux is only meaningful for DVR file playback, not live HLS streams.
   - Live manifest URL candidate order changed to prefer `/hls/master.m3u8` over bare `/hls`, ensuring a full multi-variant master playlist is requested.
   - URL probe in `resolveLiveManifestUrl` switched from browser `fetch` (GET) to Tauri HTTP `HEAD` to avoid initiating a transcoding session on Channels DVR before HLS.js connects.
-- Validation: Stats overlay confirmed 1920x1080 @ 10 Mbps after CC4C container rebuild.
 
 ## v1.8.0
 

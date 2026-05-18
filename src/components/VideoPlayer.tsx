@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { invoke } from '@tauri-apps/api/core';
-import request, { streamUrl } from '../api/client';
+import request, { streamUrl, requestWithMethod } from '../api/client';
 import {
   getLastRecordingMutationDebug,
   getLastRecordingMutationFailure,
@@ -55,6 +55,31 @@ function srtToVtt(srt: string): string | null {
 }
 
 const RE_ENABLE_BEFORE = 30; // seek this many seconds before block start to re-enable auto-skip
+
+// Matches Channels DVR live-channel HLS manifest URLs:
+// e.g. http://dvr:8089/devices/ANY/channels/9209/hls/master.m3u8
+const LIVE_CHANNEL_URL_RE = /\/devices\/([^/?#]+)\/channels\/([^/?#]+)\/hls\b/;
+
+// Best-effort: ask Channels DVR to terminate the live session so the backend
+// stream (e.g. CC4C) stops immediately instead of waiting for session timeout.
+async function stopLiveDvrSession(manifestUrl: string): Promise<void> {
+  if (!LIVE_CHANNEL_URL_RE.test(manifestUrl)) return;
+  try {
+    type DvrSession = { ID: string; Channel?: { Number?: string; ID?: string } };
+    const result = await request<DvrSession[] | { live?: DvrSession[] }>('/api/v1/sessions');
+    const sessions: DvrSession[] = Array.isArray(result) ? result : (result.live ?? []);
+    const channelId = manifestUrl.match(LIVE_CHANNEL_URL_RE)?.[2] ?? '';
+    const session = sessions.find(
+      (s) => s.Channel?.Number === channelId || s.Channel?.ID === channelId
+    );
+    if (session?.ID) {
+      await requestWithMethod(`/api/v1/sessions/${encodeURIComponent(session.ID)}`, 'DELETE');
+      console.log('[Live] Stopped Channels DVR session', session.ID);
+    }
+  } catch (e) {
+    console.warn('[Live] Could not stop Channels DVR session:', e);
+  }
+}
 type CaptionMode = 'off' | 'broadcast' | 'srt';
 
 interface NerdStats {
@@ -664,6 +689,21 @@ export default function VideoPlayer() {
       setError('HLS playback is not supported in this environment.');
     }
   }, [nowPlayingKey, preferRemux]);
+
+  // Tear down HLS.js when stopPlayback() clears nowPlayingId.
+  // The HLS setup effect depends only on [nowPlayingKey, preferRemux], so without
+  // this, HLS.js keeps fetching segments after stop — holding the Channels DVR
+  // session (and any backend live stream like CC4C) open until session timeout.
+  useEffect(() => {
+    if (nowPlayingId) return;
+    const manifestUrl = activeManifestUrlRef.current;
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    if (manifestUrl) {
+      activeManifestUrlRef.current = '';
+      void stopLiveDvrSession(manifestUrl);
+    }
+  }, [nowPlayingId]);
 
   // Track additions/removals happen asynchronously (especially broadcast CEA tracks).
   // Keep availability + current mode in sync whenever TextTracks changes.
