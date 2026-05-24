@@ -448,7 +448,7 @@ export default function Settings() {
           <p className="settings-hint">
             <em>System default</em> follows your operating system&apos;s light or dark preference.
           </p>
-          {window.__TAURI_INTERNALS__ && (
+          {!!window.__TAURI_INTERNALS__ && (
             <>
               <label className="settings-toggle settings-toggle--top-gap">
                 <input
