@@ -12,6 +12,41 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Unreleased
+
+## v1.10.0
+
+### 2026-05-20 - Rebrand to DVRDesk
+
+- Request: rename app from WinChannels to DVRDesk per request from Fancy Bits.
+- Changes: productName, window title, bundle identifier display name, Cargo package/lib names, GitHub repo URLs, bug/playback report titles, sidebar brand label, Settings About section, README, copilot instructions.
+- Identifier kept as `com.jay.winchannels` so existing installs retain their WebView localStorage (server URL, settings). Changing the identifier would reset all user configuration on upgrade.
+- localStorage sort-state keys left unchanged for the same reason.
+
+### 2026-05-20 - API compatibility test suite
+
+- Request: need a repeatable way to validate all Channels DVR API endpoints after server version upgrades before approving the new version in the compatibility matrix.
+- Solution: `tests/api-compatibility.test.ts` (Vitest, node environment). Covers all 28 endpoints the app uses: shape validation for all reads, watch/unwatch roundtrip mutation (fully restoring original state), playback_time no-op, destructive endpoint presence checks via fake IDs (no real data deleted), and live HLS probe.
+- Run with: `$env:CHANNELS_DVR_URL = "http://<server>:8089"; npm run test:api`
+- Server version `2026.05.18.1824` approved after all 28 tests passed.
+
+### 2026-05-18 - Rebuild Index action — deferred (no confirmed API endpoint)
+
+- Attempted to add a "Rebuild Index" button to recording/movie detail panes to trigger HLS streaming index regeneration via the Channels DVR API.
+- Tried `DELETE /dvr/files/{id}/index` (404) and `PUT /dvr/files/{id}/m3u8` (404, sourced from a 2019 developer forum post — endpoint has since been removed or relocated to the proprietary API).
+- Feature reverted; no code remains. Can be re-added once the correct API endpoint is confirmed via HAR capture from the Channels DVR web UI.
+- Workaround: delete the `Metadata/{FILE_ID}/` folder from the Channels DVR admin interface.
+
+### 2026-05-18 - Improve HLS buffer-gap resilience for recordings with fragmented indexes
+
+- Request: community user reported repeated buffering circles during recording playback; WinChannels log showed non-fatal `bufferStalledError`, `bufferSeekOverHole`, and `fragParsingError` events. Deleting the recording's video index (Channels DVR feature) resolved the issue, confirming a corrupted/stale index caused buffer holes.
+- Root cause: HLS.js auto-nudges the playhead past buffer holes, but the default `maxBufferHole` threshold (0.1s) and `nudgeMaxRetry` (3) were too conservative for larger gaps produced by fragmented recording indexes, causing a visible buffering spinner on each recovery cycle. Non-fatal `fragParsingError` events also left decoder state confused without explicit recovery.
+- Solution:
+  - Raised `maxBufferHole` from 0.1s to 0.5s in `hlsConfig` so HLS.js auto-skips gaps up to 0.5s without stalling.
+  - Raised `nudgeMaxRetry` from 3 to 5 so HLS.js makes more attempts before escalating.
+  - Added non-fatal `fragParsingError` handler that calls `hls.recoverMediaError()` immediately to clear confused decoder state rather than waiting for a downstream stall cycle.
+- Validation: TypeScript diagnostics clean.
+
 ## v1.9.1
 
 ### 2026-05-16 - WinChannels: stop live stream immediately when player is closed

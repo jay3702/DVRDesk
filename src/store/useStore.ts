@@ -19,6 +19,7 @@ const LIVE_SHOW_HIDDEN_KEY = 'live_show_hidden_channels';
 const KEYBINDINGS_KEY = 'player_keybindings';
 const SKIP_INTERVALS_KEY = 'player_skip_intervals';
 const THEME_KEY = 'app_theme';
+const WINDOW_ALWAYS_ON_TOP_KEY = 'window_always_on_top';
 
 export type AppTheme = 'system' | 'dark' | 'light';
 
@@ -158,6 +159,9 @@ export interface AppState {
 
   theme: AppTheme;
   setTheme: (theme: AppTheme) => void;
+
+  windowAlwaysOnTop: boolean;
+  setWindowAlwaysOnTop: (value: boolean) => void;
 
   // Currently playing item – fileId drives the VideoPlayer
   nowPlayingId: string | null;
@@ -420,6 +424,12 @@ export const useStore = create<AppState>((set) => ({
   setTheme: (theme: AppTheme) => {
     localStorage.setItem(THEME_KEY, theme);
     set({ theme });
+  },
+
+  windowAlwaysOnTop: localStorage.getItem(WINDOW_ALWAYS_ON_TOP_KEY) === 'true',
+  setWindowAlwaysOnTop: (value: boolean) => {
+    localStorage.setItem(WINDOW_ALWAYS_ON_TOP_KEY, String(value));
+    set({ windowAlwaysOnTop: value });
   },
 
   nowPlayingId: null,

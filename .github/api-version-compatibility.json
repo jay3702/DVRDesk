@@ -5,6 +5,12 @@
       "serverVersion": "2026.02.09.1530",
       "verified": true,
       "notes": "Baseline vetted during WinChannels v1.3.x development"
+    },
+    {
+      "serverVersion": "2026.05.18.1824",
+      "verified": true,
+      "testedOn": "2026-05-20",
+      "notes": "All 28 API compatibility tests passed against DVRDesk v1.9.1"
     }
   ]
 }

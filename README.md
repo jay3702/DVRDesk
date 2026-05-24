@@ -1,10 +1,10 @@
-# WinChannels
+# DVRDesk
 
-WinChannels is a native Windows and Linux desktop client for Channels DVR.
+DVRDesk is a native Windows and Linux desktop client for Channels DVR.
 
 ## Positioning
 
-WinChannels is a desktop companion app for everyday Channels DVR viewing, not a living-room HTPC frontend.
+DVRDesk is a desktop companion app for everyday Channels DVR viewing, not a living-room HTPC frontend.
 
 Its intent is to provide an easier-to-use alternative to the Channels administrative web interface for non-technical users.
 
@@ -16,10 +16,10 @@ Its intent is to provide an easier-to-use alternative to the Channels administra
 
 ## Quick Start
 
-1. Download the latest installer from the [Releases page](https://github.com/jay3702/winchannels/releases/latest):
+1. Download the latest installer from the [Releases page](https://github.com/jay3702/dvrdesk/releases/latest):
 	- **MSI** — recommended for most users
 	- **EXE** — NSIS installer, useful if MSI is blocked by policy
-2. Run the installer and launch WinChannels from the Start menu.
+2. Run the installer and launch DVRDesk from the Start menu.
 3. Open **Settings** and enter your Channels DVR server URL (e.g. `http://192.168.x.x:8089`).
 4. Optionally set the **Storage Share Path** to enable SRT sidecar captions.
 
@@ -36,7 +36,7 @@ It gives you a simple TV-style experience for browsing and watching your DVR con
 
 ## What It Does
 
-WinChannels connects to your Channels DVR server API and streams recordings via HLS.
+DVRDesk connects to your Channels DVR server API and streams recordings via HLS.
 
 Key behavior:
 
@@ -56,11 +56,11 @@ Key behavior:
 
 ## Important Shared Folder Requirement
 
-If you want SRT sidecar captions to work for all clients/users, the Channels DVR root recording folder must be shared and readable by everyone who will run WinChannels.
+If you want SRT sidecar captions to work for all clients/users, the Channels DVR root recording folder must be shared and readable by everyone who will run DVRDesk.
 
 Why this matters:
 
-- WinChannels can stream video from DVR HTTP endpoints, but sidecar `.srt` loading requires filesystem access to the recording path.
+- DVRDesk can stream video from DVR HTTP endpoints, but sidecar `.srt` loading requires filesystem access to the recording path.
 - The app maps recording paths to your configured Windows UNC share path.
 
 Example share path:
@@ -70,7 +70,7 @@ Example share path:
 Recommendations:
 
 - Share the Channels root folder (or the exact DVR recording root) from the storage host.
-- Grant read permissions to all users/machines that will use WinChannels.
+- Grant read permissions to all users/machines that will use DVRDesk.
 - Verify each user can browse the UNC path in Windows Explorer.
 
 ## Install
@@ -79,8 +79,8 @@ Recommendations:
 
 Install the generated Windows bundle:
 
-- MSI: `src-tauri/target/release/bundle/msi/WinChannels_<version>_x64_en-US.msi`
-- NSIS EXE: `src-tauri/target/release/bundle/nsis/WinChannels_<version>_x64-setup.exe`
+- MSI: `src-tauri/target/release/bundle/msi/DVRDesk_<version>_x64_en-US.msi`
+- NSIS EXE: `src-tauri/target/release/bundle/nsis/DVRDesk_<version>_x64-setup.exe`
 
 ### Option 2: Run from Source
 
@@ -165,6 +165,11 @@ If both are available, you can switch between them from the player controls.
 
 ## Release History
 
+### v1.10.0 (2026-05-20)
+App rebranded to DVRDesk.
+HLS.js buffer-gap resilience improvements: raised `maxBufferHole` to 0.5s and `nudgeMaxRetry` to 5; added `fragParsingError` recovery to clear confused decoder state without waiting for a downstream stall.
+API compatibility test suite added (`npm run test:api`) for validating Channels DVR server version upgrades; server version `2026.05.18.1824` approved.
+
 ### v1.0.0 (2026-04-14)
 Initial release: Recent Recordings, TV Shows, Movies, Library browsing, HLS playback with broadcast and SRT sidecar captions, multi-server support, and Settings.
 
@@ -213,7 +218,7 @@ Added TV shows sort option for Last Recorded (by `last_recorded_at`).
 Made Last Recorded the default sort order for the TV shows list.
 
 ### v1.3.6 (2026-04-24)
-Added startup check for newer WinChannels releases; a banner appears when a newer version is available on GitHub.
+Added startup check for newer DVRDesk releases; a banner appears when a newer version is available on GitHub.
 
 ### v1.3.7 (2026-04-25)
 Repository-hosted API compatibility matrix replaces local approval state; improved server version detection with status endpoint fallbacks; clearer per-server compatibility messaging in Settings.

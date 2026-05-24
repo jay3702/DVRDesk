@@ -541,6 +541,12 @@ export default function VideoPlayer() {
           abrEwmaDefaultEstimate: 20_000_000,
           maxBufferLength: 60,
           maxMaxBufferLength: 120,
+          // Recordings with fragmented/stale indexes can have buffer holes
+          // wider than the 0.1s default. Raise the threshold so HLS.js
+          // auto-nudges over larger gaps without stalling visibly, and allow
+          // more nudge retries before giving up.
+          maxBufferHole: 0.5,
+          nudgeMaxRetry: 5,
           abrBandWidthFactor: 0.98,
           abrBandWidthUpFactor: 0.5,
           // Extract CEA-608/708 closed captions embedded in TS segments and
@@ -555,8 +561,25 @@ export default function VideoPlayer() {
         let usedRemuxManifest = preferRemux && !isLive;
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          console.error('HLS error:', data.type, data.details, data.fatal,
-            'url:', data.url, 'response:', data.response);
+          const extras: string[] = [];
+          if (data.url) extras.push(`url: ${data.url}`);
+          if (data.response) extras.push(`HTTP ${data.response.code} ${data.response.text ?? ''}`.trimEnd());
+          const vid = videoRef.current;
+          if (vid && data.type === 'mediaError') {
+            extras.push(`t=${vid.currentTime.toFixed(2)}s bufferAhead=${getBufferAhead(vid).toFixed(2)}s readyState=${vid.readyState}`);
+          }
+          console.error(
+            `HLS ${data.fatal ? 'FATAL' : 'error'}: ${data.type} ${data.details}` +
+            (extras.length ? `  [${extras.join('  ')}]` : ''),
+          );
+
+          // For non-fatal fragment parsing errors, call recoverMediaError() to
+          // clear any confused decoder state quickly rather than waiting for
+          // the buffer stall cycle that typically follows a bad segment.
+          if (!data.fatal && data.details === 'fragParsingError') {
+            hls.recoverMediaError();
+            return;
+          }
 
           // Some DVR/server combinations may not honor encoder=remux. If the
           // remux-preferred manifest fails to load, retry once with default URL.
@@ -883,7 +906,7 @@ export default function VideoPlayer() {
     }
 
     const report = [
-      'WinChannels Playback Report',
+      'DVRDesk Playback Report',
       `Time: ${new Date().toISOString()}`,
       `Title: ${nowPlayingTitle}`,
       `File ID: ${nowPlayingId}`,

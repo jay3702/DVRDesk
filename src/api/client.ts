@@ -13,6 +13,7 @@ export interface ServerVersionInfo {
 export interface CompatibilityMatrixEntry {
   serverVersion: string;
   verified: boolean;
+  testedOn?: string;
   notes?: string;
 }
 
@@ -91,7 +92,7 @@ function repositoryRawCompatibilityUrl(): string {
   // __APP_REPOSITORY_URL__ is expected to be like https://github.com/<owner>/<repo>
   const match = __APP_REPOSITORY_URL__.match(/github\.com\/([^/]+)\/([^/]+)/i);
   if (!match) {
-    return `https://raw.githubusercontent.com/jay3702/winchannels/main/${COMPAT_MATRIX_PATH}`;
+    return `https://raw.githubusercontent.com/jay3702/dvrdesk/main/${COMPAT_MATRIX_PATH}`;
   }
   const owner = match[1];
   const repo = match[2].replace(/\.git$/i, '');
@@ -242,6 +243,9 @@ export async function fetchCompatibilityMatrix(): Promise<CompatibilityMatrixFil
       .map((entry) => ({
         serverVersion: String((entry as { serverVersion?: unknown }).serverVersion ?? '').trim(),
         verified: Boolean((entry as { verified?: unknown }).verified),
+        ...(String((entry as { testedOn?: unknown }).testedOn ?? '').trim()
+          ? { testedOn: String((entry as { testedOn?: unknown }).testedOn).trim() }
+          : {}),
         ...(String((entry as { notes?: unknown }).notes ?? '').trim()
           ? { notes: String((entry as { notes?: unknown }).notes).trim() }
           : {}),

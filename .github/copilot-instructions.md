@@ -1,4 +1,4 @@
-# WinChannels Copilot Instructions
+# DVRDesk Copilot Instructions
 
 ## Engineering Journal
 

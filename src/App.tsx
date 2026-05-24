@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { BrowserRouter, Link, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer';
@@ -41,7 +42,7 @@ function isVersionNewer(latest: string, current: string): boolean {
 
 async function fetchLatestRelease(): Promise<UpdateInfo | null> {
   try {
-    const response = await fetch('https://api.github.com/repos/jay3702/winchannels/releases/latest', {
+    const response = await fetch('https://api.github.com/repos/jay3702/dvrdesk/releases/latest', {
       headers: {
         Accept: 'application/vnd.github+json',
       },
@@ -61,7 +62,7 @@ async function fetchLatestRelease(): Promise<UpdateInfo | null> {
 }
 
 function App() {
-  const { activeServerId, serverChangeVersion, probeActiveServer, apiVersionApproved, theme } = useStore();
+  const { activeServerId, serverChangeVersion, probeActiveServer, apiVersionApproved, theme, windowAlwaysOnTop } = useStore();
   useKeyboardNav();
   const [probing, setProbing] = useState(true);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -77,6 +78,22 @@ function App() {
       html.dataset.theme = theme;
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return;
+    const win = getCurrentWindow();
+    if (!windowAlwaysOnTop) {
+      void win.setAlwaysOnTop(false);
+      return;
+    }
+    void win.isMaximized().then((maximized) => win.setAlwaysOnTop(!maximized));
+    let unlisten: (() => void) | undefined;
+    void win.onResized(async () => {
+      const maximized = await win.isMaximized();
+      await win.setAlwaysOnTop(!maximized);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [windowAlwaysOnTop]);
 
   // On startup and whenever the active server changes, probe the LAN URL and
   // automatically fall back to the Tailscale URL if the LAN is unreachable.

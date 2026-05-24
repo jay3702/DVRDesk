@@ -19,7 +19,7 @@ export default function Sidebar() {
 
   return (
     <nav className="sidebar" aria-label="Main navigation">
-      <div className="sidebar__brand">WinChannels</div>
+      <div className="sidebar__brand">DVRDesk</div>
       <div className="sidebar__server-picker">
         <label className="sidebar__server-label" htmlFor="sidebar-server-select">
           Server

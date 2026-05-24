@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as { version: string };
-const REPO_URL = "https://github.com/jay3702/winchannels";
+const REPO_URL = "https://github.com/jay3702/dvrdesk";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({

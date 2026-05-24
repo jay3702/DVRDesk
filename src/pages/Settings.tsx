@@ -43,7 +43,7 @@ function isVersionNewer(latest: string, current: string): boolean {
 
 async function fetchLatestRelease(): Promise<UpdateInfo | null> {
   try {
-    const response = await fetch('https://api.github.com/repos/jay3702/winchannels/releases/latest', {
+    const response = await fetch('https://api.github.com/repos/jay3702/dvrdesk/releases/latest', {
       headers: { Accept: 'application/vnd.github+json' },
     });
     if (!response.ok) return null;
@@ -76,13 +76,13 @@ function buildBugReportDraft(input: BuildBugReportDraftInput): string {
   const appMode = window.__TAURI_INTERNALS__ ? 'Tauri desktop' : 'Browser development';
 
   return [
-    '# WinChannels Bug Report',
+    '# DVRDesk Bug Report',
     '',
     'Please include a concise summary and exact steps to reproduce before posting this to Channels Community.',
     'Remove or edit any private hostnames or IP addresses if you do not want them included in a public post.',
     '',
     '## Environment',
-    `- WinChannels version: ${__APP_VERSION__}`,
+    `- DVRDesk version: ${__APP_VERSION__}`,
     `- Client mode: ${appMode}`,
     `- User agent: ${navigator.userAgent}`,
     `- Active server: ${input.activeServerName}`,
@@ -173,6 +173,8 @@ export default function Settings() {
     setSkipIntervals,
     theme,
     setTheme,
+    windowAlwaysOnTop,
+    setWindowAlwaysOnTop,
   } = useStore();
 
   const [draftServers, setDraftServers] = useState<ServerOption[]>(servers);
@@ -446,6 +448,21 @@ export default function Settings() {
           <p className="settings-hint">
             <em>System default</em> follows your operating system&apos;s light or dark preference.
           </p>
+          {window.__TAURI_INTERNALS__ && (
+            <>
+              <label className="settings-toggle settings-toggle--top-gap">
+                <input
+                  type="checkbox"
+                  checked={windowAlwaysOnTop}
+                  onChange={(e) => setWindowAlwaysOnTop(e.target.checked)}
+                />
+                <span>Keep window on top when not maximized</span>
+              </label>
+              <p className="settings-hint">
+                When enabled, the app window floats above other windows while in windowed mode. Disabled automatically when maximized.
+              </p>
+            </>
+          )}
         </section>
 
         <section className="settings-section">
@@ -516,7 +533,7 @@ export default function Settings() {
           {serverSaveError && <p className="settings-hint settings-hint--warn">{serverSaveError}</p>}
           <p className="settings-hint">
             Add as many servers as you like. Use the server dropdown in the left sidebar to switch instantly.
-            The <strong>Tailscale URL</strong> is optional — if provided, WinChannels will probe the LAN URL on startup
+            The <strong>Tailscale URL</strong> is optional — if provided, DVRDesk will probe the LAN URL on startup
             and fall back to the Tailscale address when it's unreachable.
           </p>
         </section>
@@ -703,14 +720,14 @@ export default function Settings() {
         <section className="settings-section">
           <h2 className="settings-section__title">About</h2>
           <p className="settings-hint settings-hint--about">
-            <strong>WinChannels</strong> v{__APP_VERSION__}
+            <strong>DVRDesk</strong> v{__APP_VERSION__}
           </p>
           <p className="settings-hint settings-hint--about">
             Repository: <a className="settings-link" href={__APP_REPOSITORY_URL__} target="_blank" rel="noreferrer">{__APP_REPOSITORY_URL__}</a>
           </p>
           {updateInfo && (
             <p className="settings-hint settings-hint--warn settings-hint--about">
-              New WinChannels client version available: <strong>{updateInfo.latestVersion}</strong>.{' '}
+              New DVRDesk client version available: <strong>{updateInfo.latestVersion}</strong>.{' '}
               <a className="settings-link" href={updateInfo.latestUrl} target="_blank" rel="noreferrer">Open releases</a>
             </p>
           )}
