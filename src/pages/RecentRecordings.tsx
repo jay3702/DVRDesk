@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchChannels, fetchRecordings, trashRecording, markAsNotRecorded, fetchDvrFile } from '../api/recordings';
+import request from '../api/client';
 import type { Channel, Recording } from '../api/types';
 import { useStore } from '../store/useStore';
 import type { AppState } from '../store/useStore';
-import { applyLogoFallback, buildChannelLogoMap, logoForChannelKey } from '../lib/channelLogos';
+import { buildChannelLogoMap, buildGuideLogoMap, logoForChannelKey, nextLogoVariant } from '../lib/channelLogos';
 import { useResizableSidebar } from '../lib/useResizableSidebar';
 import RecordingDetail from '../components/RecordingDetail';
 import './Page.css';
@@ -163,22 +164,23 @@ export default function RecentRecordings() {
 
     void (async () => {
       try {
-        const [loadedRecordings, loadedChannels] = await Promise.all([
+        const [loadedRecordings, loadedChannels, loadedGuide] = await Promise.all([
           fetchRecordings(),
           fetchChannels().catch(() => [] as Channel[]),
+          request<Record<string, unknown>>('/dvr/guide/channels').catch(() => ({} as Record<string, unknown>)),
         ]);
         if (cancelled) return;
-        const nextLogos = buildChannelLogoMap(loadedChannels);
+        const nextLogos = { ...buildChannelLogoMap(loadedChannels), ...buildGuideLogoMap(loadedGuide) };
         const previousRecordings = cached?.recordings ?? [];
         const hasNewItems = loadedRecordings.some((rec) => rec.created_at > (cached?.newestCreatedAt ?? 0));
         const feedChanged = hasRecordingFeedChanged(previousRecordings, loadedRecordings);
 
         writeRecentRecordingsCache(cacheKey, loadedRecordings, nextLogos);
 
+        setChannelLogos(nextLogos);
         if (!cached || hasNewItems || feedChanged) {
           setRecordings(loadedRecordings);
           setGroups(groupByDayTime(loadedRecordings));
-          setChannelLogos(nextLogos);
         }
       } catch (e) {
         if (cancelled) return;
@@ -248,14 +250,32 @@ export default function RecentRecordings() {
                           rec.show_id ? 'episode' : 'movie'
                         )}
                       >
-                        {logoUrl && (
-                          <img
-                            src={logoUrl}
-                            alt={rec.channel}
-                            className="rec-item__logo"
-                            onError={(e) => applyLogoFallback(e.currentTarget)}
-                          />
-                        )}
+                        <span className="rec-item__logo-slot" aria-hidden="true">
+                          {logoUrl ? (
+                            <img
+                              src={logoUrl}
+                              alt=""
+                              className="rec-item__logo"
+                              onError={(e) => {
+                                const img = e.currentTarget;
+                                const next = nextLogoVariant(img.src);
+                                if (next && next !== img.src) {
+                                  img.src = next;
+                                } else {
+                                  img.style.display = 'none';
+                                  const num = img.nextElementSibling as HTMLElement | null;
+                                  if (num) num.style.display = 'flex';
+                                }
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            className="rec-item__logo-num"
+                            style={logoUrl ? { display: 'none' } : undefined}
+                          >
+                            {rec.channel}
+                          </span>
+                        </span>
                         <span className="rec-item__main">
                           <span className="rec-item__title">{recLabel(rec)}</span>
                           {(rec.watched || progress > 0) && (

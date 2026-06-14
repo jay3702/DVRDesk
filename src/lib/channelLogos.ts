@@ -1,6 +1,9 @@
 import { getServerUrl } from '../api/client';
 import type { Channel } from '../api/types';
 
+const TMS_CDN_PREFIX = 'https://tmsimg.fancybits.co/assets/';
+const TMS_LOCAL_PATH = '/tmsimg/assets/';
+
 export function channelLogoUrl(channel: Pick<Channel, 'logo_url' | 'station_id'>): string | undefined {
   const direct = channel.logo_url?.trim();
   if (direct) return direct;
@@ -47,4 +50,24 @@ export function logoForChannelKey(key: string | null | undefined, logoMap: Recor
   const clean = (key || '').trim();
   if (!clean) return null;
   return logoMap[clean] ?? logoMap[clean.toLowerCase()] ?? null;
+}
+
+export function buildGuideLogoMap(guide: Record<string, unknown>): Record<string, string> {
+  const map: Record<string, string> = {};
+  const server = getServerUrl();
+  for (const raw of Object.values(guide)) {
+    const ch = raw as { Image?: string; Name?: string; ID?: string; ChannelID?: string; Number?: string };
+    if (!ch?.Image) continue;
+    const url = ch.Image.startsWith(TMS_CDN_PREFIX)
+      ? `${server}${TMS_LOCAL_PATH}${ch.Image.slice(TMS_CDN_PREFIX.length)}`
+      : ch.Image;
+    const keys = [ch.ChannelID, ch.ID, ch.Name, ch.Number]
+      .filter((k): k is string => Boolean(k && k.trim()))
+      .map((k) => k.trim());
+    for (const key of keys) {
+      map[key] = url;
+      map[key.toLowerCase()] = url;
+    }
+  }
+  return map;
 }

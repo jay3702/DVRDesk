@@ -3,7 +3,7 @@ import { fetchChannels } from '../api/recordings';
 import request, { getServerUrl } from '../api/client';
 import type { Channel } from '../api/types';
 import { useStore } from '../store/useStore';
-import { applyLogoFallback, channelLogoUrl } from '../lib/channelLogos';
+import { applyLogoFallback, buildGuideLogoMap, channelLogoUrl, logoForChannelKey } from '../lib/channelLogos';
 import './Page.css';
 
 type SortMode = 'alpha' | 'number';
@@ -37,6 +37,7 @@ interface LiveCacheEntry {
   channels: Channel[];
   guideFavorites: string[];
   guideHidden: string[];
+  guideLogoMap: Record<string, string>;
 }
 
 const liveCache = new Map<string, LiveCacheEntry>();
@@ -311,6 +312,7 @@ export default function Live() {
   const [channels, setChannels] = useState<Channel[]>(cached?.channels ?? []);
   const [guideFavorites, setGuideFavorites] = useState<Set<string>>(new Set(cached?.guideFavorites ?? []));
   const [guideHidden, setGuideHidden] = useState<Set<string>>(new Set(cached?.guideHidden ?? []));
+  const [guideLogoMap, setGuideLogoMap] = useState<Record<string, string>>(cached?.guideLogoMap ?? {});
   const [sortMode, setSortMode] = useState<SortMode>(initialSortState.sortMode);
   const [diagnosticsSortMode, setDiagnosticsSortMode] = useState<DiagnosticsSortMode>(initialSortState.diagnosticsSortMode);
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -340,6 +342,7 @@ export default function Live() {
       setChannels(cachedRows.channels);
       setGuideFavorites(new Set(cachedRows.guideFavorites));
       setGuideHidden(new Set(cachedRows.guideHidden));
+      setGuideLogoMap(cachedRows.guideLogoMap);
     }
 
     Promise.all([
@@ -350,14 +353,17 @@ export default function Live() {
         if (cancelled) return;
         const nextFavorites = Array.from(parseGuideFavorites(loadedGuide));
         const nextHidden = Array.from(parseGuideHidden(loadedGuide));
+        const nextGuideLogoMap = buildGuideLogoMap(loadedGuide);
         liveCache.set(cacheKey, {
           channels: loadedChannels,
           guideFavorites: nextFavorites,
           guideHidden: nextHidden,
+          guideLogoMap: nextGuideLogoMap,
         });
         setChannels(loadedChannels);
         setGuideFavorites(new Set(nextFavorites));
         setGuideHidden(new Set(nextHidden));
+        setGuideLogoMap(nextGuideLogoMap);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
@@ -640,17 +646,22 @@ export default function Live() {
                 }}
                 aria-pressed={selectedChannelId === row.id}
               >
-                {channelLogoUrl(row.channel) ? (
-                  <img
-                    className="show-item__thumb"
-                    src={channelLogoUrl(row.channel)}
-                    alt=""
-                    aria-hidden="true"
-                    onError={(e) => applyLogoFallback(e.currentTarget)}
-                  />
-                ) : (
-                  <span className="show-item__icon" aria-hidden="true">📺</span>
-                )}
+                {(() => {
+                  const url = logoForChannelKey(row.channel.number, guideLogoMap)
+                    ?? logoForChannelKey(row.channel.id, guideLogoMap)
+                    ?? channelLogoUrl(row.channel);
+                  return url ? (
+                    <img
+                      className="show-item__thumb"
+                      src={url}
+                      alt=""
+                      aria-hidden="true"
+                      onError={(e) => applyLogoFallback(e.currentTarget)}
+                    />
+                  ) : (
+                    <span className="show-item__icon" aria-hidden="true">📺</span>
+                  );
+                })()}
                 <span className="live-item__text">
                   <span className="show-item__name">
                     {row.channel.number} {row.channel.name}
@@ -725,17 +736,22 @@ export default function Live() {
                                 {items.map((item) => (
                                   <div key={item.id} className="live-diag-cell">
                                     <div className="live-diag-cell__line">
-                                      {channelLogoUrl(item.channel) ? (
-                                        <img
-                                          className="live-diag-cell__logo"
-                                          src={channelLogoUrl(item.channel)}
-                                          alt=""
-                                          aria-hidden="true"
-                                          onError={(e) => applyLogoFallback(e.currentTarget)}
-                                        />
-                                      ) : (
-                                        <span className="live-diag-cell__icon" aria-hidden="true">📺</span>
-                                      )}
+                                      {(() => {
+                                        const url = logoForChannelKey(item.channel.number, guideLogoMap)
+                                          ?? logoForChannelKey(item.channel.id, guideLogoMap)
+                                          ?? channelLogoUrl(item.channel);
+                                        return url ? (
+                                          <img
+                                            className="live-diag-cell__logo"
+                                            src={url}
+                                            alt=""
+                                            aria-hidden="true"
+                                            onError={(e) => applyLogoFallback(e.currentTarget)}
+                                          />
+                                        ) : (
+                                          <span className="live-diag-cell__icon" aria-hidden="true">📺</span>
+                                        );
+                                      })()}
                                       <span className="live-diag-cell__name">{item.channel.name || '-'}</span>
                                       {isFavoriteChannel(item.channel, guideFavorites) && (
                                         <span className="live-diag-cell__favorite">favorite</span>

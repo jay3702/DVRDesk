@@ -1118,10 +1118,18 @@
   font-weight: 600;
 }
 
-.rec-item__logo {
+.rec-item__logo-slot {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rec-item__logo {
+  width: 28px;
+  height: 28px;
   object-fit: contain;
   opacity: 0.8;
   transition: opacity 0.1s;
@@ -1129,6 +1137,20 @@
 
 .rec-item:hover .rec-item__logo {
   opacity: 1;
+}
+
+.rec-item__logo-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  color: var(--wc-text-muted);
+  word-break: break-all;
 }
 
 /* ── Recording detail pane ──────────────────────────────────────────────── */
