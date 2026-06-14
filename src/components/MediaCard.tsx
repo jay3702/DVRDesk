@@ -167,9 +167,12 @@ export default function MediaCard({
           </span>
         </div>
       </div>
-      {progress > 0 && !watched && (
+      {(watched || progress > 0) && (
         <div className="media-card__progress">
-          <div className="media-card__progress-fill" style={{ width: `${progress}%` }} />
+          <div
+            className={`media-card__progress-fill${watched ? ' media-card__progress-fill--watched' : ''}`}
+            style={{ width: watched ? '100%' : `${progress}%` }}
+          />
         </div>
       )}
     </div>

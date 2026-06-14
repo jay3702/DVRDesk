@@ -8,7 +8,17 @@ import './Page.css';
 
 type SearchType = 'any' | 'title' | 'summary' | 'series-name';
 type ResultType = 'TV Episode' | 'TV Series' | 'Movie' | 'Video';
+type WatchedStatus = 'not-watched' | 'partial' | 'watched';
 const SEARCH_STATE_KEY = 'winchannels_search_state_v1';
+
+interface WatchedFilter {
+  notWatched: boolean;
+  partial: boolean;
+  watched: boolean;
+  includeSeries: boolean;
+}
+
+const DEFAULT_WATCHED_FILTER: WatchedFilter = { notWatched: true, partial: true, watched: true, includeSeries: true };
 
 interface SearchResultRow {
   key: string;
@@ -20,6 +30,8 @@ interface SearchResultRow {
   summary: string;
   fullSummary: string;
   navigateTo: string;
+  watchedStatus: WatchedStatus | null;
+  progressPct: number;
 }
 
 function includesNeedle(value: string | undefined, needle: string): boolean {
@@ -38,24 +50,42 @@ function formatDate(ms: number | null): string {
   });
 }
 
-function loadSearchState(): { keyword: string; submittedKeyword: string; searchType: SearchType } {
+function loadSearchState(): { keyword: string; submittedKeyword: string; searchType: SearchType; watchedFilter: WatchedFilter } {
   try {
     const raw = localStorage.getItem(SEARCH_STATE_KEY);
-    if (!raw) return { keyword: '', submittedKeyword: '', searchType: 'any' };
-    const parsed = JSON.parse(raw) as Partial<{ keyword: string; submittedKeyword: string; searchType: SearchType }>;
+    if (!raw) return { keyword: '', submittedKeyword: '', searchType: 'any', watchedFilter: DEFAULT_WATCHED_FILTER };
+    const parsed = JSON.parse(raw) as Partial<{ keyword: string; submittedKeyword: string; searchType: SearchType; watchedFilter: WatchedFilter }>;
     const searchType = parsed.searchType;
     const safeType: SearchType =
       searchType === 'any' || searchType === 'title' || searchType === 'summary' || searchType === 'series-name'
         ? searchType
         : 'any';
+    const wf = parsed.watchedFilter;
+    const watchedFilter: WatchedFilter = wf && typeof wf === 'object'
+      ? { notWatched: wf.notWatched ?? true, partial: wf.partial ?? true, watched: wf.watched ?? true, includeSeries: wf.includeSeries ?? true }
+      : DEFAULT_WATCHED_FILTER;
     return {
       keyword: parsed.keyword ?? '',
       submittedKeyword: parsed.submittedKeyword ?? '',
       searchType: safeType,
+      watchedFilter,
     };
   } catch {
-    return { keyword: '', submittedKeyword: '', searchType: 'any' };
+    return { keyword: '', submittedKeyword: '', searchType: 'any', watchedFilter: DEFAULT_WATCHED_FILTER };
   }
+}
+
+function getWatchedStatus(watched: boolean, playbackTime: number): WatchedStatus {
+  if (watched) return 'watched';
+  if (playbackTime > 0) return 'partial';
+  return 'not-watched';
+}
+
+function watchedStatusMatches(status: WatchedStatus | null, filter: WatchedFilter): boolean {
+  if (status === null) return filter.includeSeries;
+  if (status === 'watched') return filter.watched;
+  if (status === 'partial') return filter.partial;
+  return filter.notWatched;
 }
 
 export default function Search() {
@@ -63,6 +93,7 @@ export default function Search() {
   const [keyword, setKeyword] = useState(initialState.keyword);
   const [submittedKeyword, setSubmittedKeyword] = useState(initialState.submittedKeyword);
   const [searchType, setSearchType] = useState<SearchType>(initialState.searchType);
+  const [watchedFilter, setWatchedFilter] = useState<WatchedFilter>(initialState.watchedFilter);
   const [shows, setShows] = useState<Show[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -93,13 +124,14 @@ export default function Search() {
   useEffect(() => {
     localStorage.setItem(
       SEARCH_STATE_KEY,
-      JSON.stringify({ keyword, submittedKeyword, searchType }),
+      JSON.stringify({ keyword, submittedKeyword, searchType, watchedFilter }),
     );
-  }, [keyword, searchType, submittedKeyword]);
+  }, [keyword, searchType, submittedKeyword, watchedFilter]);
 
   const results = useMemo(() => {
     const needle = submittedKeyword.trim().toLocaleLowerCase();
     if (!needle) return [] as SearchResultRow[];
+
 
     const rows: SearchResultRow[] = [];
 
@@ -121,7 +153,7 @@ export default function Search() {
         (searchType === 'summary' && inSummary) ||
         (searchType === 'series-name' && inSeriesName);
 
-      if (!matched) continue;
+      if (!matched || !watchedStatusMatches(null, watchedFilter)) continue;
 
       rows.push({
         key: `series:${show.id}`,
@@ -133,6 +165,8 @@ export default function Search() {
         summary: show.summary ?? '',
         fullSummary: '',
         navigateTo: `/tv?showId=${encodeURIComponent(show.id)}`,
+        watchedStatus: null,
+        progressPct: 0,
       });
     }
 
@@ -155,7 +189,8 @@ export default function Search() {
         (searchType === 'summary' && inSummary) ||
         (searchType === 'series-name' && inSeriesName);
 
-      if (!matched) continue;
+      const epWatchedStatus = getWatchedStatus(ep.watched, ep.playback_time);
+      if (!matched || !watchedStatusMatches(epWatchedStatus, watchedFilter)) continue;
 
       rows.push({
         key: `episode:${ep.id}`,
@@ -167,6 +202,8 @@ export default function Search() {
         summary: ep.summary,
         fullSummary: ep.full_summary ?? '',
         navigateTo: `/tv?showId=${encodeURIComponent(ep.show_id)}&episodeId=${encodeURIComponent(ep.id)}`,
+        watchedStatus: epWatchedStatus,
+        progressPct: ep.duration > 0 ? Math.min(Math.round((ep.playback_time / ep.duration) * 100), 100) : 0,
       });
     }
 
@@ -179,7 +216,8 @@ export default function Search() {
         (searchType === 'title' && inTitle) ||
         (searchType === 'summary' && inSummary);
 
-      if (!matched) continue;
+      const movieWatchedStatus = getWatchedStatus(movie.watched, movie.playback_time);
+      if (!matched || !watchedStatusMatches(movieWatchedStatus, watchedFilter)) continue;
 
       rows.push({
         key: `movie:${movie.id}`,
@@ -191,6 +229,8 @@ export default function Search() {
         summary: movie.summary,
         fullSummary: movie.full_summary ?? '',
         navigateTo: `/movies?movieId=${encodeURIComponent(movie.id)}`,
+        watchedStatus: movieWatchedStatus,
+        progressPct: movie.duration > 0 ? Math.min(Math.round((movie.playback_time / movie.duration) * 100), 100) : 0,
       });
     }
 
@@ -203,7 +243,8 @@ export default function Search() {
         (searchType === 'title' && inTitle) ||
         (searchType === 'summary' && inSummary);
 
-      if (!matched) continue;
+      const videoWatchedStatus = getWatchedStatus(video.watched, video.playback_time);
+      if (!matched || !watchedStatusMatches(videoWatchedStatus, watchedFilter)) continue;
 
       rows.push({
         key: `video:${video.id}`,
@@ -215,6 +256,8 @@ export default function Search() {
         summary: video.summary ?? '',
         fullSummary: '',
         navigateTo: `/library?groupId=${encodeURIComponent(video.video_group_id)}&videoId=${encodeURIComponent(video.id)}`,
+        watchedStatus: videoWatchedStatus,
+        progressPct: video.duration > 0 ? Math.min(Math.round((video.playback_time / video.duration) * 100), 100) : 0,
       });
     }
 
@@ -230,7 +273,7 @@ export default function Search() {
       return (b.createdAt ?? 0) - (a.createdAt ?? 0);
     });
     return rows;
-  }, [episodes, movies, searchType, shows, submittedKeyword, videos]);
+  }, [episodes, movies, searchType, shows, submittedKeyword, videos, watchedFilter]);
 
   function runSearch(e?: FormEvent<HTMLFormElement>) {
     e?.preventDefault();
@@ -318,6 +361,42 @@ export default function Search() {
             Series Name
           </label>
         </fieldset>
+
+        <fieldset className="search-panel__types">
+          <legend>Watched Status</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={watchedFilter.notWatched}
+              onChange={(e) => setWatchedFilter((f) => ({ ...f, notWatched: e.target.checked }))}
+            />
+            Not watched
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={watchedFilter.partial}
+              onChange={(e) => setWatchedFilter((f) => ({ ...f, partial: e.target.checked }))}
+            />
+            Partially watched
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={watchedFilter.watched}
+              onChange={(e) => setWatchedFilter((f) => ({ ...f, watched: e.target.checked }))}
+            />
+            Watched
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={watchedFilter.includeSeries}
+              onChange={(e) => setWatchedFilter((f) => ({ ...f, includeSeries: e.target.checked }))}
+            />
+            Include Series
+          </label>
+        </fieldset>
       </form>
 
       {loading && <p className="page__status">Loading search index…</p>}
@@ -348,7 +427,17 @@ export default function Search() {
                     className="search-results__row"
                     onClick={() => navigate(row.navigateTo)}
                   >
-                    <td>{row.type}</td>
+                    <td className="search-results__type-cell">
+                      <span className="search-results__type-label">{row.type}</span>
+                      {row.watchedStatus !== null && (
+                        <div className="search-results__type-progress">
+                          <div
+                            className={`search-results__type-progress-fill${row.watchedStatus === 'watched' ? ' search-results__type-progress-fill--watched' : ''}`}
+                            style={{ width: `${row.watchedStatus === 'watched' ? 100 : row.progressPct}%` }}
+                          />
+                        </div>
+                      )}
+                    </td>
                     <td>{formatDate(row.createdAt)}</td>
                     <td>{formatDate(row.updatedAt)}</td>
                     <td>{row.title}</td>

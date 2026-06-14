@@ -258,9 +258,12 @@ export default function RecentRecordings() {
                         )}
                         <span className="rec-item__main">
                           <span className="rec-item__title">{recLabel(rec)}</span>
-                          {progress > 0 && !rec.watched && (
+                          {(rec.watched || progress > 0) && (
                             <span className="rec-item__progress" aria-hidden="true">
-                              <span className="rec-item__progress-fill" style={{ width: `${progress}%` }} />
+                              <span
+                                className={`rec-item__progress-fill${rec.watched ? ' rec-item__progress-fill--watched' : ''}`}
+                                style={{ width: rec.watched ? '100%' : `${progress}%` }}
+                              />
                             </span>
                           )}
                         </span>

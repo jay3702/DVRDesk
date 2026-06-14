@@ -119,11 +119,11 @@ export default function RecordingDetail({
       <div className="rec-detail__body">
         <h2 className="rec-detail__title">{item.title}</h2>
 
-        {item.duration > 0 && !item.watched && (item.playback_time ?? 0) > 0 && (
+        {item.duration > 0 && (item.watched || (item.playback_time ?? 0) > 0) && (
           <span className="rec-detail__progress" aria-hidden="true">
             <span
-              className="rec-detail__progress-fill"
-              style={{ width: `${Math.min(((item.playback_time ?? 0) / item.duration) * 100, 100)}%` }}
+              className={`rec-detail__progress-fill${item.watched ? ' rec-detail__progress-fill--watched' : ''}`}
+              style={{ width: item.watched ? '100%' : `${Math.min(((item.playback_time ?? 0) / item.duration) * 100, 100)}%` }}
             />
           </span>
         )}

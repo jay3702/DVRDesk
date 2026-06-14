@@ -203,3 +203,8 @@
   background: #0078d4;
   border-radius: 0 2px 2px 0;
 }
+
+.media-card__progress-fill--watched {
+  background: #2d9144;
+  border-radius: 0;
+}

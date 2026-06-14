@@ -14,6 +14,22 @@ This file adds the decision context that is usually missing from commit messages
 
 ## Unreleased
 
+## v1.12.0
+
+### 2026-05-24 - Watched status progress bar shown for fully-watched items
+
+- Bug: episodes and movies showed a progress bar when partially watched but not when 100% watched. The condition `progress > 0 && !watched` explicitly excluded fully-watched items.
+- Affected locations: `MediaCard.tsx` (card grid), `RecordingDetail.tsx` (detail pane), and `RecentRecordings.tsx` (list sidebar) — each had its own copy of the condition.
+- Fix: changed to `watched || progress > 0` in all three locations. When `watched` is true the bar renders at 100% width using a green (`#2d9144`) `--watched` CSS variant rather than the in-progress blue/accent, making the two states visually distinct.
+- New CSS classes: `media-card__progress-fill--watched`, `rec-detail__progress-fill--watched`, `rec-item__progress-fill--watched`.
+
+### 2026-05-24 - Search page: watched status filter and progress bar in results
+
+- Added a "Watched Status" filter fieldset to the Search page with four checkboxes: Not watched, Partially watched, Watched, Include Series — all checked by default, persisted to localStorage.
+- Filtering logic: episodes, movies, and videos are classified as `not-watched`, `partial`, or `watched` based on `watched` flag and `playback_time`. TV Series have no per-series watched state so they are controlled independently by the Include Series checkbox; toggling Include Series is orthogonal to the three watched checkboxes.
+- Bug found during implementation: the shows loop was missing the `watchedStatusMatches` call entirely, so TV Series always passed the filter regardless of checkbox state.
+- Added `progressPct` field to `SearchResultRow` and rendered a progress bar in the Type column beneath the type label ("TV Episode", "Movie", etc.). Bar uses the same color scheme as other progress bars: accent gradient for partial, green for watched. Type column is pinned to 90 px so "TV Episode" never wraps.
+
 ## v1.10.0
 
 ### 2026-05-20 - Rebrand to DVRDesk
