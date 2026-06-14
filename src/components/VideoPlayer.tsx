@@ -226,6 +226,7 @@ export default function VideoPlayer() {
   const [hasSrt, setHasSrt] = useState(false);
   const [hasBroadcast, setHasBroadcast] = useState(false);
   const [captionMode, setCaptionMode] = useState<CaptionMode>('off');
+  const [remuxFallbackMsg, setRemuxFallbackMsg] = useState<string | null>(null);
   const [reportCopied, setReportCopied] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [nerdStats, setNerdStats] = useState<NerdStats | null>(null);
@@ -519,6 +520,7 @@ export default function VideoPlayer() {
 
     if (Hls.isSupported()) {
       let cancelled = false;
+      let stallCheckIntervalId: ReturnType<typeof setInterval> | null = null;
 
       void (async () => {
         // Use the Tauri loader whenever we're running inside Tauri (dev or prod)
@@ -628,6 +630,47 @@ export default function VideoPlayer() {
             video.play().catch((e: Error) => { if (!cancelled) setError(e.message); });
             syncCaptionState(video);
 
+            // Detect remux stalls: if buffer stays near-empty for 5s while on the
+            // remux level (level 0), switch to the best transcoded level. A corrupt
+            // CDVR video index silently prevents segment delivery on the remux stream
+            // while transcoded levels re-encode on-the-fly and are unaffected.
+            if (usedRemuxManifest) {
+              let bufferLowStartMs: number | null = null;
+              stallCheckIntervalId = setInterval(() => {
+                if (cancelled) { clearInterval(stallCheckIntervalId!); stallCheckIntervalId = null; return; }
+                const vid = videoRef.current;
+                if (!vid || vid.paused || !usedRemuxManifest || hls.currentLevel !== 0 || vid.currentTime < 2) {
+                  bufferLowStartMs = null;
+                  return;
+                }
+                if (getBufferAhead(vid) < 0.5) {
+                  const now = Date.now();
+                  if (bufferLowStartMs === null) {
+                    bufferLowStartMs = now;
+                  } else if (now - bufferLowStartMs >= 5000) {
+                    clearInterval(stallCheckIntervalId!);
+                    stallCheckIntervalId = null;
+                    const levels = hls.levels;
+                    let bestTranscoded = -1;
+                    for (let i = 1; i < levels.length; i++) {
+                      if (bestTranscoded === -1 || (levels[i].bitrate ?? 0) > (levels[bestTranscoded].bitrate ?? 0)) {
+                        bestTranscoded = i;
+                      }
+                    }
+                    if (bestTranscoded !== -1) {
+                      hls.currentLevel = bestTranscoded;
+                      if (!cancelled) {
+                        setRemuxFallbackMsg('Remux stream stalled — switched to transcoded playback');
+                        setTimeout(() => { if (!cancelled) setRemuxFallbackMsg(null); }, 7000);
+                      }
+                    }
+                  }
+                } else {
+                  bufferLowStartMs = null;
+                }
+              }, 1000);
+            }
+
             if (
               !hasAppliedResumeRef.current &&
               nowPlayingResumeTime > 5 &&
@@ -692,6 +735,7 @@ export default function VideoPlayer() {
 
       return () => {
         cancelled = true;
+        if (stallCheckIntervalId !== null) { clearInterval(stallCheckIntervalId); stallCheckIntervalId = null; }
         hlsRef.current?.destroy();
         hlsRef.current = null;
         if (subtitleBlobUrl.current) {
@@ -1033,6 +1077,7 @@ export default function VideoPlayer() {
       )}
 
       {skipping && <div className="video-skip-toast">Skipping commercial…</div>}
+      {remuxFallbackMsg && <div className="video-skip-toast">{remuxFallbackMsg}</div>}
 
       {diagnosticsEnabled && showStats && nerdStats && (
         <div className="video-nerd-panel" aria-live="polite">
