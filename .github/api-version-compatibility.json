@@ -11,6 +11,12 @@
       "verified": true,
       "testedOn": "2026-05-20",
       "notes": "All 28 API compatibility tests passed against DVRDesk v1.9.1"
+    },
+    {
+      "serverVersion": "2026.06.29.0212",
+      "verified": true,
+      "testedOn": "2026-06-30",
+      "notes": "All 28 API compatibility tests passed against DVRDesk v1.14.0"
     }
   ]
 }
