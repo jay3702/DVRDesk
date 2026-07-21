@@ -706,7 +706,22 @@ export default function VideoPlayer() {
                   hasAutoRecoveredRef.current = true;
                   clearInterval(liveRecoveryIntervalId!);
                   liveRecoveryIntervalId = null;
-                  setLiveRecoveryNonce((n) => n + 1);
+                  // Recreating the HLS.js instance alone isn't enough — the stuck
+                  // stream is a broken CC4C session on the DVR side, and simply
+                  // reconnecting to the same manifest URL just reattaches to the
+                  // same broken pipeline (confirmed: recovery only ever worked
+                  // after a manual close, which tears down the DVR session first).
+                  // Stop the session before reconnecting so the next request forces
+                  // a fresh tune, same as the manual stop/restart workaround. The
+                  // session-list API is flaky (frequently 404s even with a live
+                  // session), so this is best-effort; the short pause afterward
+                  // mirrors the real-world gap a manual stop/reopen naturally has
+                  // and gives the DVR backend a beat to actually release the tuner.
+                  void stopLiveDvrSession(activeManifestUrlRef.current).finally(() => {
+                    setTimeout(() => {
+                      if (!cancelled) setLiveRecoveryNonce((n) => n + 1);
+                    }, 1500);
+                  });
                   return;
                 }
                 if (elapsedMs > 8000) {

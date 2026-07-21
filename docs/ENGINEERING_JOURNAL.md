@@ -12,6 +12,15 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.9
+
+### 2026-07-21 - Self-heal reconnected to the same broken DVR session; now tears it down first
+
+- Bug: v1.14.8's watchdog fix worked — console diagnostics confirmed it correctly detected the frozen pattern (`frozen=true` at t=4006ms) and triggered recovery. But the recreated HLS.js instance immediately got stuck in the same `bufferSeekOverHole`/`bufferStalledError`/`bufferNudgeOnStall` loop at `readyState=1`, never recovering on its own. Clean playback only started once the reporter manually closed and reopened the channel (visible in the log as `[Live] Could not stop Channels DVR session` firing — that call only happens on a real manual stop).
+- Root cause: recreating the HLS.js instance against the *same* manifest URL doesn't help, because the actual problem lives server-side — the DVR's CC4C encoder session itself is stuck. Reconnecting to the same URL just reattaches to the same broken pipeline. The manual workaround only ever worked because closing the channel calls `stopLiveDvrSession()` (`DELETE /api/v1/sessions/{id}`) before re-tuning, forcing Channels DVR to spin up a fresh CC4C process on the next request.
+- Fix (`VideoPlayer.tsx`): the self-heal path now calls `stopLiveDvrSession(activeManifestUrlRef.current)` before reconnecting, then waits 1.5s (mirroring the natural gap a manual stop/reopen has) before bumping `liveRecoveryNonce`. Note `/api/v1/sessions` is known to be flaky (frequently 404s even with an active session — see the v1.14.4 entry), so this is best-effort like the existing manual-stop call, not guaranteed to always find and kill the session.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest with console diagnostics.
+
 ## v1.14.8
 
 ### 2026-07-21 - Fix self-heal watchdog's incorrect paused guard; add diagnostics
