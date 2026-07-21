@@ -12,6 +12,19 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.4
+
+### 2026-07-20 - Wrong webkit2gtk package name; CI never installed GStreamer for AppImage bundling
+
+- Reported: user on Ubuntu 24.04 (amd64) hit `HLS playback is not supported in this environment.` on the v1.14.3 AppImage, and then couldn't install the v1.14.3 `.deb` at all.
+- Root cause #1 (`.deb` uninstallable): `bundle.linux.deb.depends` in `src-tauri/tauri.conf.json` listed `libwebkit2gtk-4.1-37`, a package name that has never existed in any Ubuntu repo — leftover from the old `libwebkit2gtk-4.0-37` soname when the config was bumped from the 4.0 to the 4.1 API without updating the soname suffix. The real Ubuntu 24.04 package is `libwebkit2gtk-4.1-0`. `apt`/`dpkg` refused to install the package with an unmet-dependency error even though the correct library was already present on the system.
+- Root cause #2 (AppImage still fails despite v1.14.2's fix): `bundle.linux.appimage.bundleMediaFramework: true` (added in v1.14.2) only bundles whatever GStreamer plugins are present on the *build machine*. `.github/workflows/release.yml`'s "Install Linux dependencies" step never installed any GStreamer packages, so the CI runner had none to bundle — the AppImage silently shipped without `hlsdemux` (in `gstreamer1.0-plugins-bad`) or codec support (`gstreamer1.0-libav`), falling back to whatever GStreamer plugins happen to be on the host, which is the same failure v1.14.2 was meant to fix.
+- Fix:
+  - `src-tauri/tauri.conf.json`: corrected `libwebkit2gtk-4.1-37` → `libwebkit2gtk-4.1-0`, and added `gstreamer1.0-plugins-good`/`gstreamer1.0-plugins-bad` to the `.deb` depends list (previously only `gstreamer1.0-libav` was declared; `hlsdemux` lives in `plugins-bad`, not `libav`).
+  - `.github/workflows/release.yml`: added `gstreamer1.0-plugins-base`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `gstreamer1.0-libav`, `gstreamer1.0-tools` to the Linux dependency install step so `bundleMediaFramework` actually has plugins to copy into the AppImage.
+  - `README.md`: corrected the documented `.deb` dependency list to match.
+- Validation: confirmed via `apt-cache policy` that `libwebkit2gtk-4.1-37` resolves to nothing on Ubuntu 24.04 while `libwebkit2gtk-4.1-0` is installable; confirmed the reporter's system was missing exactly `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`, matching root cause #2. `cargo` is not available in this environment, so `Cargo.lock`'s `dvrdesk` package version was updated by hand to match (no dependency changes, so no other resolution needed); a real `cargo check`/`cargo build` should still be run before tagging the release.
+
 ## v1.14.3
 
 ### 2026-07-21 - Suppress spurious error from remux-fallback play() race

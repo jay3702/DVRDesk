@@ -55,7 +55,7 @@ Key behavior:
 - Optional but recommended for SRT sidecar captions: access to the DVR storage path as a Windows share
 - On Linux, the runtime requires WebKit2GTK and GStreamer codec support for HLS playback:
   - **AppImage**: bundles GStreamer itself, no extra packages needed.
-  - **.deb**: `apt`/`dpkg` installs the required packages automatically (`libwebkit2gtk-4.1-37`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-libav`, `libayatana-appindicator3-1`, `xdg-utils`).
+  - **.deb**: `apt`/`dpkg` installs the required packages automatically (`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `gstreamer1.0-libav`, `libayatana-appindicator3-1`, `xdg-utils`).
   - If HLS still fails with `HLS playback is not supported in this environment.`, install the packages above manually.
 
 ## Important Shared Folder Requirement

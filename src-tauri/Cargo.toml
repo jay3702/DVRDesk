@@ -1,6 +1,6 @@
 [package]
 name = "dvrdesk"
-version = "1.14.3"
+version = "1.14.4"
 description = "DVRDesk - Channels DVR Desktop Client"
 authors = ["you"]
 edition = "2021"
