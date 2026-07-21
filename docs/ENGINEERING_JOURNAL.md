@@ -12,6 +12,17 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.11
+
+### 2026-07-21 - Fix infinite self-heal restart loop introduced in v1.14.10
+
+- Bug: v1.14.10 fixed the *previous* problem (recovery not working) but introduced a worse one — reporter found the app now kills and restarts the live session every ~10 seconds indefinitely.
+- Root cause: v1.14.10's recovery calls the store's `stopPlayback()` then `playItem()` to reopen the same channel, which is necessary for a real fix — but `playItem()` bumps `nowPlayingKey`, which is exactly what the effect resetting `hasAutoRecoveredRef.current = false` depends on (`VideoPlayer.tsx` ~line 253). So every time self-heal reopened the channel, it unconditionally re-armed itself. If the reopened channel's cold start takes the same few seconds (plausible — it's the same physical tuner/CC4C pipeline each time), the watchdog fires again, reopens again, forever.
+- Fix: added `selfHealInProgressRef`, set right before the recovery's `stopPlayback()`/`playItem()` sequence. The reset effect checks this flag and skips resetting `hasAutoRecoveredRef` exactly once when the reset fires because of the recovery's own `playItem()` call, then clears the flag itself — restoring "one automatic recovery attempt per genuine channel tune" rather than "every tune, forever." Note the flag must be cleared inside the effect, not by the calling code right after `playItem()` — effects only run after the current synchronous callback finishes, so clearing it eagerly would race ahead of the effect actually observing it.
+- Second bug, same report: recordings stopped playing entirely. Cause: the recovery's `setTimeout(() => { ...; playItem(...); }, 1500)` was never captured or cleared. If the effect tore down before it fired (e.g. the user navigated away to play a recording), the stale timeout would still fire later and call `playItem()` with the OLD live channel's captured params, hijacking whatever had since started playing. Fix: captured the timer as `liveRecoveryTimeoutId`, cleared it in the effect's cleanup (same as the existing interval cleanup), and added a `cancelled` check inside the callback as a second line of defense.
+- Known residual limitation: if the user manually closes the live channel (not by opening something else) within the 1.5s recovery grace window, the pending timeout isn't cancelled (`stopPlayback()` alone doesn't change this effect's deps) and will reopen the channel once more. Narrow and low-impact enough not to block shipping this fix, but worth revisiting if reported.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest.
+
 ## v1.14.10
 
 ### 2026-07-21 - Self-heal now drives a real stop+reopen instead of an in-place HLS retry

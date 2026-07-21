@@ -239,6 +239,7 @@ export default function VideoPlayer() {
   const captionModeRef = useRef<CaptionMode>('off');
   const hasAppliedResumeRef = useRef(false);
   const hasAutoRecoveredRef = useRef(false);
+  const selfHealInProgressRef = useRef(false);
   const hasMarkedWatchedRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef<number | null>(null);
@@ -252,7 +253,18 @@ export default function VideoPlayer() {
 
   useEffect(() => {
     hasAppliedResumeRef.current = false;
-    hasAutoRecoveredRef.current = false;
+    // Skip resetting the self-heal flag exactly once when this effect fires
+    // because of our OWN recovery's playItem() call reopening the same
+    // channel — otherwise a channel whose cold start reliably takes a few
+    // seconds would trigger recovery, reopen, hit the same cold-start window,
+    // and trigger again forever. Must clear the flag here (not in the
+    // recovery code that sets it) since effects only run after the recovery
+    // code's synchronous callback has already finished.
+    if (selfHealInProgressRef.current) {
+      selfHealInProgressRef.current = false;
+    } else {
+      hasAutoRecoveredRef.current = false;
+    }
     hasMarkedWatchedRef.current = false;
     saveInFlightRef.current = false;
     pendingSaveRef.current = null;
@@ -525,6 +537,7 @@ export default function VideoPlayer() {
       let cancelled = false;
       let stallCheckIntervalId: ReturnType<typeof setInterval> | null = null;
       let liveRecoveryIntervalId: ReturnType<typeof setInterval> | null = null;
+      let liveRecoveryTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
       void (async () => {
         // Use the Tauri loader whenever we're running inside Tauri (dev or prod)
@@ -723,8 +736,25 @@ export default function VideoPlayer() {
                   const recoverManifestUrl = nowPlayingManifestUrl;
                   const recoverResumeTime = nowPlayingResumeTime;
                   const recoverRecordingKind = nowPlayingRecordingKind;
+                  // playItem() bumps nowPlayingKey, which would otherwise reset
+                  // hasAutoRecoveredRef and let this fire forever if the
+                  // reopened channel hits the same cold-start window. Setting
+                  // this flag lets the reset effect skip that one reset; it's
+                  // cleared there, not here (the effect only runs after this
+                  // callback returns, so clearing it here would be too early).
+                  selfHealInProgressRef.current = true;
                   stopPlayback();
-                  setTimeout(() => {
+                  liveRecoveryTimeoutId = setTimeout(() => {
+                    liveRecoveryTimeoutId = null;
+                    // If this effect was torn down (channel changed, e.g. the
+                    // user opened a recording or a different live channel)
+                    // before this timer fired, do NOT reopen — that would
+                    // resurrect the OLD live channel using stale captured
+                    // params on top of whatever is playing now.
+                    if (cancelled) {
+                      selfHealInProgressRef.current = false;
+                      return;
+                    }
                     if (recoverFileId) {
                       playItem(
                         recoverFileId,
@@ -735,6 +765,11 @@ export default function VideoPlayer() {
                         recoverResumeTime,
                         recoverRecordingKind
                       );
+                    } else {
+                      // No channel to reopen (shouldn't normally happen) —
+                      // nothing will bump nowPlayingKey to clear the flag via
+                      // the reset effect, so clear it directly here instead.
+                      selfHealInProgressRef.current = false;
                     }
                   }, 1500);
                   return;
@@ -853,6 +888,7 @@ export default function VideoPlayer() {
         cancelled = true;
         if (stallCheckIntervalId !== null) { clearInterval(stallCheckIntervalId); stallCheckIntervalId = null; }
         if (liveRecoveryIntervalId !== null) { clearInterval(liveRecoveryIntervalId); liveRecoveryIntervalId = null; }
+        if (liveRecoveryTimeoutId !== null) { clearTimeout(liveRecoveryTimeoutId); liveRecoveryTimeoutId = null; }
         hlsRef.current?.destroy();
         hlsRef.current = null;
         if (subtitleBlobUrl.current) {
