@@ -627,7 +627,10 @@ export default function VideoPlayer() {
               return levelPixels > bestPixels ? idx : bestIdx;
             }, 0);
             hls.currentLevel = bestLevelIndex;
-            video.play().catch((e: Error) => { if (!cancelled) setError(e.message); });
+            // AbortError ("play() interrupted by new load request") is expected
+            // when the remux fallback calls loadSource() while play() is pending.
+            // The new source will fire MANIFEST_PARSED and call play() again.
+            video.play().catch((e: Error) => { if (!cancelled && (e as DOMException).name !== 'AbortError') setError(e.message); });
             syncCaptionState(video);
 
             // Detect remux stalls: if buffer stays near-empty for 5s while on the
