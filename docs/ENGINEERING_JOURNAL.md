@@ -12,13 +12,15 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
-## Unreleased
+## v1.14.3
 
 ### 2026-07-21 - Suppress spurious error from remux-fallback play() race
 
 - Bug: the v1.14.0 auto-fallback from remux to transcoded stream (on buffer stall) could surface a visible player error even when the fallback itself succeeded.
 - Cause: the fallback calls `hls.loadSource()` for the transcoded stream while an earlier `video.play()` from the remux source is still pending. The browser aborts that pending `play()` with an `AbortError` ("interrupted by a new load request"), which the `.catch()` handler treated as a real playback error.
 - Fix: `VideoPlayer.tsx` now ignores `AbortError` in that `.catch()` — the new source's `MANIFEST_PARSED` handler calls `play()` again once it's ready, so no playback is lost.
+
+## v1.14.2
 
 ### 2026-07-21 - AppImage bundles GStreamer; v1.14.1 release never shipped
 
