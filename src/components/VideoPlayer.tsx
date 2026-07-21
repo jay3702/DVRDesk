@@ -691,10 +691,18 @@ export default function VideoPlayer() {
                 const dropped = quality?.droppedVideoFrames ?? 0;
                 const decoded = quality?.totalVideoFrames ?? 0;
                 const droppedPct = decoded > 20 ? (dropped / decoded) * 100 : 0;
-                const frozen = elapsedMs > 4000 && !vid.paused && vid.currentTime < 0.5;
+                // Deliberately NOT gated on !vid.paused: the most common cold-start
+                // failure is the element sitting genuinely paused (play() blocked)
+                // rather than playing-but-stuck, and this should self-heal either way.
+                const frozen = elapsedMs > 4000 && vid.currentTime < 0.5;
                 const choppy = decoded > 20 && droppedPct > 15;
+                console.debug(
+                  `[Live self-heal] t=${elapsedMs}ms currentTime=${vid.currentTime.toFixed(2)} paused=${vid.paused} ` +
+                  `decoded=${decoded} dropped=${dropped} droppedPct=${droppedPct.toFixed(1)} frozen=${frozen} choppy=${choppy}`
+                );
 
                 if (frozen || choppy) {
+                  console.debug(`[Live self-heal] triggering recovery (frozen=${frozen} choppy=${choppy})`);
                   hasAutoRecoveredRef.current = true;
                   clearInterval(liveRecoveryIntervalId!);
                   liveRecoveryIntervalId = null;

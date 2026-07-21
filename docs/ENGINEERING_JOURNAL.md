@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.8
+
+### 2026-07-21 - Fix self-heal watchdog's incorrect paused guard; add diagnostics
+
+- Bug: the v1.14.7 self-heal watchdog (`VideoPlayer.tsx`) did not trigger at all on the frozen-frame failure mode.
+- Root cause: the `frozen` condition required `!vid.paused`, on the assumption the element would be "playing but stuck." In practice the actual failure is the element sitting genuinely **paused** (the v1.14.6 muted-autoplay fix apparently still isn't reliably unblocking `play()` in this case) — so `!vid.paused` was false the whole time, `frozen` never evaluated true, and since nothing was decoding, the dropped-frame count never climbed either, so `choppy` never triggered. The watchdog was structurally incapable of catching this specific case.
+- Fix: removed the `!vid.paused` requirement — `frozen` now triggers on `currentTime < 0.5` after 4s regardless of paused state, since the same recovery action (tear down and recreate the HLS.js instance) is appropriate either way.
+- Also added `console.debug('[Live self-heal] ...')` logging on every watchdog tick (currentTime, paused, dropped/decoded counts, which condition fired) so if this still doesn't fully resolve it, the next report gives concrete evidence instead of requiring another guess-and-release cycle. Session investigation directly against the DVR's HLS output (raw manifest/segment inspection) found no obvious server-side corruption (valid MPEG-TS sync bytes, no `EXT-X-DISCONTINUITY`, sane segment durations) — the cause still looks client-side.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest, this time with console diagnostics attached.
+
 ## v1.14.7
 
 ### 2026-07-21 - Auto-recover from live channel cold-start artifacts
