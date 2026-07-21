@@ -639,7 +639,32 @@ export default function VideoPlayer() {
             // AbortError ("play() interrupted by new load request") is expected
             // when the remux fallback calls loadSource() while play() is pending.
             // The new source will fire MANIFEST_PARSED and call play() again.
-            video.play().catch((e: Error) => { if (!cancelled && (e as DOMException).name !== 'AbortError') setError(e.message); });
+            //
+            // Live channels resolve their manifest URL through several sequential
+            // HEAD probes (see Live.tsx), which can take long enough that the user
+            // gesture which opened the channel has expired by the time we get
+            // here — WebKitGTK then silently leaves the element paused (full
+            // buffer, climbing readyState, no NotAllowedError) instead of
+            // rejecting play() cleanly. Muted autoplay is unconditionally
+            // allowed, so start muted and restore the prior mute state once
+            // playback actually begins, making the first play() reliable
+            // regardless of that gesture-timing race.
+            const wasMuted = video.muted;
+            video.muted = true;
+            video.play()
+              .then(() => {
+                video.muted = wasMuted;
+                if (isLive) {
+                  // WebKitGTK/GStreamer can leave the video layer painted on its
+                  // last frame after resuming from a paused/buffering state even
+                  // though decode and audio progress normally. A tiny currentTime
+                  // nudge forces a repaint; recordings get an equivalent nudge
+                  // from the resume-position seek below, but live streams have
+                  // no fixed duration to seek to.
+                  video.currentTime += 0.01;
+                }
+              })
+              .catch((e: Error) => { if (!cancelled && (e as DOMException).name !== 'AbortError') setError(e.message); });
             syncCaptionState(video);
 
             // Detect remux stalls: if buffer stays near-empty for 5s while on the

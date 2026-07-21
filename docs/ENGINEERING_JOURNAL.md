@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.6
+
+### 2026-07-21 - Live channel autoplay blocked by gesture-timing race; frozen frame after resume
+
+- Bug: v1.14.5's `bufferSeekOverHole`/`bufferStalledError` recovery did not fix live channel playback. Reporter confirmed the pattern more precisely: selecting a channel shows a black screen with the native paused-state play icon; waiting shows one static frame with no audio; clicking the play icon starts audio but the video stays frozen on a single image (clicking again reveals a new frame); closing and reopening the same channel plays instantly and correctly, after which other channels also start immediately.
+- Root cause #1 (needs manual click): `video.play()` is called from the `Hls.Events.MANIFEST_PARSED` handler (`VideoPlayer.tsx`), an async hls.js callback carrying no user-gesture token. Live channels resolve their manifest URL through several sequential HEAD probes (`Live.tsx`'s `candidateLiveManifestUrls`/`resolveLiveManifestUrl`), which takes long enough that the gesture which opened the channel has expired by the time `play()` fires. Recordings resolve to one fixed, already-known URL near-instantly and stay inside the gesture window, so they never hit this. WebKitGTK doesn't cleanly reject the blocked `play()` with `NotAllowedError` here — it silently leaves the element paused with a full buffer, which matches the console log showing `currentTime` frozen at `t=0.98s` while `bufferAhead` climbed to ~30s and `readyState` rose from 1 to 4 across repeated (spurious) `bufferStalledError`/`bufferSeekOverHole` events. The v1.14.5 recovery fix was treating a symptom of this, not the cause.
+- Root cause #2 (frozen frame after the manual click succeeds): once genuinely resumed from an extended paused/buffered state, the video layer doesn't repaint on its own — a likely WebKitGTK/GStreamer video-sink quirk. Recordings incidentally avoid this because the existing resume-position seek (`video.currentTime = nowPlayingResumeTime`, gated on `Number.isFinite(video.duration)`) forces a repaint; live channels have `Infinity`/`NaN` duration and never take that branch.
+- Fix (`VideoPlayer.tsx` ~line 642): before calling `play()`, force `video.muted = true` (muted autoplay is unconditionally allowed regardless of gesture timing) and restore the prior mute state once the play promise resolves, making the first `play()` reliable independent of the HEAD-probe race. On success, for live streams specifically, nudge `video.currentTime` by 0.01s to force a repaint, mirroring the effect recordings already get from their resume-seek.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest. `tsc` was not run locally (no Node toolchain here) — CI's `npm run build` step will catch any type errors.
+
 ## v1.14.5
 
 ### 2026-07-21 - Live channel freezes on one frame (audio keeps playing) during cold start
