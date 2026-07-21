@@ -12,6 +12,15 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.10
+
+### 2026-07-21 - Self-heal now drives a real stop+reopen instead of an in-place HLS retry
+
+- Bug: v1.14.9's session-teardown attempt still didn't fix it. Console log showed the watchdog fired correctly, `stopLiveDvrSession` 404'd (as expected — see prior entries), one `bufferStalledError`, then a fully clean second stretch. Reporter clarified the clean stretch was them **manually** restarting after the automated recovery attempt itself still failed — v1.14.9's fix had no real effect, the log just happened to look encouraging.
+- Root cause: `liveRecoveryNonce`-based recovery only ever recreated the internal HLS.js instance while reusing the same `nowPlayingManifestUrl` already stored in the Zustand store — it never went through the app's actual stop/reopen state machine. A real manual close calls `stopPlayback()`, which clears `nowPlayingId` and triggers the *separate* effect that destroys HLS.js and calls `stopLiveDvrSession()` — reopening then calls `playItem()` again, which increments `nowPlayingKey` and fully re-triggers the main HLS setup effect from scratch. The internal-only retry was never equivalent to this, no matter how much extra teardown logic was bolted onto it.
+- Fix (`VideoPlayer.tsx`): removed the `liveRecoveryNonce` mechanism entirely. Self-heal now captures the current playback params (`nowPlayingId`, title, file path, commercials, manifest URL, resume time, recording kind), calls the store's `stopPlayback()` directly, waits 1.5s, then calls `playItem()` again with the same params — i.e. it now presses the same two buttons a user would, programmatically, instead of trying to fake the effect from inside the HLS-only retry.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest. This is the first attempt that actually drives the same code path the manual workaround uses, rather than approximating it.
+
 ## v1.14.9
 
 ### 2026-07-21 - Self-heal reconnected to the same broken DVR session; now tears it down first

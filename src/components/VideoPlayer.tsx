@@ -202,6 +202,7 @@ export default function VideoPlayer() {
     nowPlayingRecordingKind,
     storageSharePath,
     stopPlayback,
+    playItem,
     serverChangeVersion,
     preferRemux,
     diagnosticsEnabled,
@@ -238,7 +239,6 @@ export default function VideoPlayer() {
   const captionModeRef = useRef<CaptionMode>('off');
   const hasAppliedResumeRef = useRef(false);
   const hasAutoRecoveredRef = useRef(false);
-  const [liveRecoveryNonce, setLiveRecoveryNonce] = useState(0);
   const hasMarkedWatchedRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef<number | null>(null);
@@ -706,22 +706,37 @@ export default function VideoPlayer() {
                   hasAutoRecoveredRef.current = true;
                   clearInterval(liveRecoveryIntervalId!);
                   liveRecoveryIntervalId = null;
-                  // Recreating the HLS.js instance alone isn't enough — the stuck
-                  // stream is a broken CC4C session on the DVR side, and simply
-                  // reconnecting to the same manifest URL just reattaches to the
-                  // same broken pipeline (confirmed: recovery only ever worked
-                  // after a manual close, which tears down the DVR session first).
-                  // Stop the session before reconnecting so the next request forces
-                  // a fresh tune, same as the manual stop/restart workaround. The
-                  // session-list API is flaky (frequently 404s even with a live
-                  // session), so this is best-effort; the short pause afterward
-                  // mirrors the real-world gap a manual stop/reopen naturally has
-                  // and gives the DVR backend a beat to actually release the tuner.
-                  void stopLiveDvrSession(activeManifestUrlRef.current).finally(() => {
-                    setTimeout(() => {
-                      if (!cancelled) setLiveRecoveryNonce((n) => n + 1);
-                    }, 1500);
-                  });
+                  // Recreating just the HLS.js instance (reusing the same
+                  // manifest URL) reattaches to the same stuck DVR-side CC4C
+                  // session and gets stuck again — confirmed by testing: it only
+                  // ever actually recovers after a REAL manual close+reopen via
+                  // the store, not an in-place retry. So drive the same state
+                  // transition the close button uses: stopPlayback() (which
+                  // triggers the existing effect that destroys HLS.js and calls
+                  // stopLiveDvrSession()), then playItem() again with the same
+                  // params after a short pause mirroring the natural gap a manual
+                  // stop/reopen has.
+                  const recoverFileId = nowPlayingId;
+                  const recoverTitle = nowPlayingTitle;
+                  const recoverFilePath = nowPlayingFilePath;
+                  const recoverCommercials = nowPlayingCommercials;
+                  const recoverManifestUrl = nowPlayingManifestUrl;
+                  const recoverResumeTime = nowPlayingResumeTime;
+                  const recoverRecordingKind = nowPlayingRecordingKind;
+                  stopPlayback();
+                  setTimeout(() => {
+                    if (recoverFileId) {
+                      playItem(
+                        recoverFileId,
+                        recoverTitle,
+                        recoverFilePath,
+                        recoverCommercials,
+                        recoverManifestUrl,
+                        recoverResumeTime,
+                        recoverRecordingKind
+                      );
+                    }
+                  }, 1500);
                   return;
                 }
                 if (elapsedMs > 8000) {
@@ -857,7 +872,7 @@ export default function VideoPlayer() {
     } else {
       setError('HLS playback is not supported in this environment.');
     }
-  }, [nowPlayingKey, preferRemux, liveRecoveryNonce]);
+  }, [nowPlayingKey, preferRemux]);
 
   // Tear down HLS.js when stopPlayback() clears nowPlayingId.
   // The HLS setup effect doesn't depend on nowPlayingId itself, so without
