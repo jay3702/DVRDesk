@@ -53,6 +53,10 @@ Key behavior:
 - A reachable Channels DVR server on your network
 - DVR server URL (for example `http://192.168.3.150:8089`)
 - Optional but recommended for SRT sidecar captions: access to the DVR storage path as a Windows share
+- On Linux, the runtime requires WebKit2GTK and GStreamer codec support for HLS playback:
+  - **AppImage**: bundles GStreamer itself, no extra packages needed.
+  - **.deb**: `apt`/`dpkg` installs the required packages automatically (`libwebkit2gtk-4.1-37`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-libav`, `libayatana-appindicator3-1`, `xdg-utils`).
+  - If HLS still fails with `HLS playback is not supported in this environment.`, install the packages above manually.
 
 ## Important Shared Folder Requirement
 

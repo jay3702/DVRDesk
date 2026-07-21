@@ -14,6 +14,21 @@ This file adds the decision context that is usually missing from commit messages
 
 ## Unreleased
 
+### 2026-07-21 - AppImage bundles GStreamer; v1.14.1 release never shipped
+
+- Reported: [GitHub issue #3](https://github.com/jay3702/DVRDesk/issues/3) — AppImage user hits `HLS playback is not supported in this environment.` on the v1.14.0 release, the same bug the 2026-07-16 entry below claimed to fix.
+- Root cause #1: the v1.14.1 tag/release never actually built. `9a165af` placed `deb` directly under `bundle` instead of `bundle.linux.deb`; every target in the v1.14.1 release workflow failed with `Additional properties are not allowed ('deb' was unexpected)`, so v1.14.0 remained the latest published release with none of the Linux fixes.
+- Root cause #2: even a working `.deb` fix would not have helped this reporter — they installed the AppImage, and `.deb`-only `depends` declarations are enforced by `apt`/`dpkg` and have no effect on AppImage, which has no dependency-resolution mechanism of its own.
+- Fix: corrected the `bundle.linux.deb` nesting, and set `bundle.linux.appimage.bundleMediaFramework: true` in `src-tauri/tauri.conf.json` so the AppImage bundles its own GStreamer plugins instead of relying on the host system having them installed. Updated `README.md` to describe the AppImage/`.deb` distinction instead of a single generic Linux bullet.
+- Validation: `cargo check` regenerated `Cargo.lock` against the corrected config; version bumped to 1.14.2 (1.14.1 tag is considered burned since its release build never succeeded).
+
+### 2026-07-16 - Linux HLS runtime dependency support
+
+- Bug: Ubuntu `.deb` installs and launches, but video playback fails with `HLS playback is not supported in this environment.`
+- Cause: the Linux WebKit runtime can lack MediaSource and codec support for HLS unless WebKit2GTK/GStreamer runtime packages are installed.
+- Fix: declared Linux `.deb` runtime dependencies in `src-tauri/tauri.conf.json` and documented the required Ubuntu packages in `README.md`.
+- Validation: bundle dependency declarations added and Linux install instructions updated. **Correction (2026-07-21): this release build itself failed — see the entry above.**
+
 ## v1.12.0
 
 ### 2026-05-24 - Watched status progress bar shown for fully-watched items

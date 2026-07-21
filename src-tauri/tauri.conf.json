@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DVRDesk",
-  "version": "1.14.1",
+  "version": "1.14.2",
   "identifier": "com.jay.winchannels",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -26,16 +26,21 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "deb": {
-      "depends": [
-        "libwebkit2gtk-4.1-37",
-        "libgtk-3-0",
-        "libgstreamer1.0-0",
-        "libgstreamer-plugins-base1.0-0",
-        "gstreamer1.0-libav",
-        "libayatana-appindicator3-1",
-        "xdg-utils"
-      ]
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-37",
+          "libgtk-3-0",
+          "libgstreamer1.0-0",
+          "libgstreamer-plugins-base1.0-0",
+          "gstreamer1.0-libav",
+          "libayatana-appindicator3-1",
+          "xdg-utils"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
     },
     "icon": [
       "icons/32x32.png",
