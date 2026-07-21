@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.5
+
+### 2026-07-21 - Live channel freezes on one frame (audio keeps playing) during cold start
+
+- Bug: selecting a live channel required a manual click on the play button (no autoplay), then after a few seconds audio started but video stayed frozen on a single frame; clicking the video refreshed the frame once but it stayed frozen. Closing and reopening the same channel played normally.
+- Console showed `HLS error: mediaError bufferSeekOverHole` — note "error", not "FATAL". `VideoPlayer.tsx`'s error handler only calls `hls.recoverMediaError()` for non-fatal `fragParsingError`; every other non-fatal error (including `bufferSeekOverHole`) fell through with no handling, relying entirely on hls.js's own internal gap-nudge (`_trySkipBufferHole`), which was visibly not resolving the stall on cold-started live channels (the DVR's remux pipeline ramping up produces early buffer gaps that recordings, already fully indexed on disk, don't hit).
+- Also observed: `[Live] Could not stop Channels DVR session: Error: API error 404: GET /api/v1/sessions` on close. Investigated and ruled out as the cause — `tests/api-compatibility.test.ts` already documents a 404 from `/api/v1/sessions` as expected/normal when no session is active; this is fire-and-forget best-effort teardown, not a broken endpoint.
+- Fix: extended the existing non-fatal recovery branch in `VideoPlayer.tsx` to also call `hls.recoverMediaError()` for `bufferSeekOverHole` and `bufferStalledError`, so a stuck decoder actively recovers instead of waiting on hls.js's default nudge behavior.
+- Validation: `tsc` was not run locally (no Node/cargo toolchain available in this environment) — relying on CI's `npm run build` (which runs `tsc` before `vite build`) to catch any type errors before this ships.
+
 ## v1.14.4
 
 ### 2026-07-20 - Wrong webkit2gtk package name; CI never installed GStreamer for AppImage bundling

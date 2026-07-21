@@ -578,7 +578,16 @@ export default function VideoPlayer() {
           // For non-fatal fragment parsing errors, call recoverMediaError() to
           // clear any confused decoder state quickly rather than waiting for
           // the buffer stall cycle that typically follows a bad segment.
-          if (!data.fatal && data.details === 'fragParsingError') {
+          // bufferSeekOverHole/bufferStalledError show up on live channels
+          // while the DVR's remux pipeline is still ramping up: hls.js's
+          // built-in nudge can get stuck retrying past the same hole, leaving
+          // the player frozen on one frame with audio still advancing.
+          if (
+            !data.fatal &&
+            (data.details === 'fragParsingError' ||
+              data.details === 'bufferSeekOverHole' ||
+              data.details === 'bufferStalledError')
+          ) {
             hls.recoverMediaError();
             return;
           }
