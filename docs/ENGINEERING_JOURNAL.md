@@ -12,6 +12,16 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## v1.14.7
+
+### 2026-07-21 - Auto-recover from live channel cold-start artifacts
+
+- Bug: v1.14.6's mute/repaint fix did not fully resolve live playback. Reporter found two distinct cold-start failure modes on a fresh channel tune: (a) video frozen on one frame until the screen is clicked, or (b) plays with a heavy dropped-frame rate that visibly looks like motion jumping backward then forward. Diagnostics (built-in Playback Report) confirmed this is front-loaded: one channel showed 140 dropped / 557 decoded frames (25%) in the first few seconds, then **zero** additional drops over the next 23 seconds of the same session (dropped % only diluted as decoded count grew) — i.e. not a sustained decode-capacity problem, just a rough start. In every case, manually stopping and restarting the same channel produced perfect playback.
+- Root cause: believed to be on the Channels DVR side — the live encoder/remux (CC4C) pipeline produces rough segments for the first several seconds after a fresh tune (irregular timestamps/GOP structure while it ramps up), which a from-scratch client can't correct by itself. This is a hypothesis, not confirmed against DVR-side logs.
+- Fix (`VideoPlayer.tsx`, live-only, `isLive` gated): rather than requiring the user to manually stop/restart, added a watchdog that samples `video.getVideoPlaybackQuality()` and `currentTime` every 500ms for up to 8 seconds after a live tune. If playback is frozen (`currentTime < 0.5s` after 4s while not paused) or choppy (>15% dropped frames with a meaningful sample size), it self-heals once per tune: tears down and recreates the HLS.js instance against the same manifest URL (via a new `liveRecoveryNonce` dependency on the HLS setup effect), mirroring the manual close/reopen workaround without a full DVR session teardown. Guarded by `hasAutoRecoveredRef` to only attempt this once per tune, avoiding retry loops if a channel is broken for unrelated reasons (e.g. tuner failure).
+- Next step (not yet done): investigate whether Channels DVR exposes any setting/API behavior that avoids the cold-start roughness in the first place, rather than papering over it client-side.
+- Validation: not reproducible in this environment (no access to a live Channels DVR tuner); relying on the reporter's real-world retest. `tsc` was not run locally (no Node toolchain here) — CI's `npm run build` step will catch any type errors.
+
 ## v1.14.6
 
 ### 2026-07-21 - Live channel autoplay blocked by gesture-timing race; frozen frame after resume

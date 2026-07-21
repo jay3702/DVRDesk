@@ -237,6 +237,8 @@ export default function VideoPlayer() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captionModeRef = useRef<CaptionMode>('off');
   const hasAppliedResumeRef = useRef(false);
+  const hasAutoRecoveredRef = useRef(false);
+  const [liveRecoveryNonce, setLiveRecoveryNonce] = useState(0);
   const hasMarkedWatchedRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const pendingSaveRef = useRef<number | null>(null);
@@ -250,6 +252,7 @@ export default function VideoPlayer() {
 
   useEffect(() => {
     hasAppliedResumeRef.current = false;
+    hasAutoRecoveredRef.current = false;
     hasMarkedWatchedRef.current = false;
     saveInFlightRef.current = false;
     pendingSaveRef.current = null;
@@ -521,6 +524,7 @@ export default function VideoPlayer() {
     if (Hls.isSupported()) {
       let cancelled = false;
       let stallCheckIntervalId: ReturnType<typeof setInterval> | null = null;
+      let liveRecoveryIntervalId: ReturnType<typeof setInterval> | null = null;
 
       void (async () => {
         // Use the Tauri loader whenever we're running inside Tauri (dev or prod)
@@ -667,6 +671,43 @@ export default function VideoPlayer() {
               .catch((e: Error) => { if (!cancelled && (e as DOMException).name !== 'AbortError') setError(e.message); });
             syncCaptionState(video);
 
+            // Channels DVR's live encoder/remux pipeline can produce rough
+            // segments for the first several seconds after a fresh channel
+            // tune — the video can sit frozen on one frame, or play with a
+            // heavy dropped-frame rate that looks like frames arriving out of
+            // order. Empirically, tearing down and reconnecting once the
+            // pipeline has had a few seconds to stabilize reliably produces
+            // clean playback (the same effect as manually closing and
+            // reopening the channel), so detect the bad pattern once per tune
+            // and self-heal automatically instead of requiring that manual step.
+            if (isLive && !hasAutoRecoveredRef.current) {
+              const recoveryStartMs = Date.now();
+              liveRecoveryIntervalId = setInterval(() => {
+                if (cancelled) { clearInterval(liveRecoveryIntervalId!); liveRecoveryIntervalId = null; return; }
+                const vid = videoRef.current;
+                if (!vid) return;
+                const elapsedMs = Date.now() - recoveryStartMs;
+                const quality = typeof vid.getVideoPlaybackQuality === 'function' ? vid.getVideoPlaybackQuality() : null;
+                const dropped = quality?.droppedVideoFrames ?? 0;
+                const decoded = quality?.totalVideoFrames ?? 0;
+                const droppedPct = decoded > 20 ? (dropped / decoded) * 100 : 0;
+                const frozen = elapsedMs > 4000 && !vid.paused && vid.currentTime < 0.5;
+                const choppy = decoded > 20 && droppedPct > 15;
+
+                if (frozen || choppy) {
+                  hasAutoRecoveredRef.current = true;
+                  clearInterval(liveRecoveryIntervalId!);
+                  liveRecoveryIntervalId = null;
+                  setLiveRecoveryNonce((n) => n + 1);
+                  return;
+                }
+                if (elapsedMs > 8000) {
+                  clearInterval(liveRecoveryIntervalId!);
+                  liveRecoveryIntervalId = null;
+                }
+              }, 500);
+            }
+
             // Detect remux stalls: if buffer stays near-empty for 5s while on the
             // remux level (level 0), switch to the best transcoded level. A corrupt
             // CDVR video index silently prevents segment delivery on the remux stream
@@ -773,6 +814,7 @@ export default function VideoPlayer() {
       return () => {
         cancelled = true;
         if (stallCheckIntervalId !== null) { clearInterval(stallCheckIntervalId); stallCheckIntervalId = null; }
+        if (liveRecoveryIntervalId !== null) { clearInterval(liveRecoveryIntervalId); liveRecoveryIntervalId = null; }
         hlsRef.current?.destroy();
         hlsRef.current = null;
         if (subtitleBlobUrl.current) {
@@ -792,10 +834,10 @@ export default function VideoPlayer() {
     } else {
       setError('HLS playback is not supported in this environment.');
     }
-  }, [nowPlayingKey, preferRemux]);
+  }, [nowPlayingKey, preferRemux, liveRecoveryNonce]);
 
   // Tear down HLS.js when stopPlayback() clears nowPlayingId.
-  // The HLS setup effect depends only on [nowPlayingKey, preferRemux], so without
+  // The HLS setup effect doesn't depend on nowPlayingId itself, so without
   // this, HLS.js keeps fetching segments after stop — holding the Channels DVR
   // session (and any backend live stream like CC4C) open until session timeout.
   useEffect(() => {
