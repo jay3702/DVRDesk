@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DVRDesk
+Comment=Native Channels DVR desktop client
+Exec=dvrdesk-native
+Icon=dvrdesk-native
+Terminal=false
+Categories=AudioVideo;Player;

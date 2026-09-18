@@ -1,0 +1,199 @@
+# Builds and drafts a release for DVRDesk Native (native/) and its
+# guide-history-service companion — a separate pipeline from release.yml
+# (which builds the Tauri app on `v*` tags), triggered on a distinct
+# `native-v*` tag prefix so the two release trains never collide.
+#
+# Deliberately narrower than a "real" cross-platform release for v1:
+# - Linux x86_64 and Windows x86_64 only (no arm64, no macOS).
+# - Linux ships a real .deb with a `libmpv2` runtime dependency declared —
+#   libmpv is dlopen'd at runtime (see native/src/player/mpv_sys.rs), never
+#   linked at compile time, confirmed via `ldd` that nothing but libc is
+#   actually linked, so no build-time system packages are needed at all.
+# - Windows: mpv/libmpv is NOT bundled. An earlier version of this workflow
+#   downloaded a prebuilt libmpv-2.dll from the SourceForge mpv-player-windows
+#   project (built by shinchiro/mpv-winbuild-cmake) — checked that build's own
+#   packages/ffmpeg.cmake directly and confirmed it's configured with
+#   `--enable-gpl --enable-version3`, and mpv.cmake sets no LGPL override
+#   either, so that specific build is GPL-licensed. Redistributing it inside
+#   this app's own shipped .zip would put the whole distributed bundle under
+#   GPL obligations, which isn't a decision to make silently by picking a
+#   convenient download URL. Instead the Windows .zip ships the bare .exe
+#   plus a short README pointing the user at installing mpv themselves
+#   (e.g. `winget install mpv-player.mpv-CI`, confirmed to be a real current
+#   winget package) — same shape as the Linux .deb's `Depends: libmpv2`,
+#   just without a package manager to declare it to. Building mpv/FFmpeg
+#   from source under controlled LGPL flags, the way Clicker
+#   (github.com/mackid1993/Clicker, this rewrite's own inspiration) does for
+#   its own releases, would let this app bundle libmpv directly again — a
+#   real, substantial follow-up, not attempted this pass.
+# - No code signing/notarization, no installer (NSIS/WiX) — Windows ships as
+#   a portable .zip.
+# - Always drafts the release rather than publishing it automatically
+#   (mirrors Clicker's own release.yml design) — a human reviews and clicks
+#   publish once every platform's asset is actually in hand.
+#
+# The Windows job as a whole is untested against a real windows-latest
+# runner as of when this was written (this dev environment has no way to
+# run one) — the first real tag push is the actual verification for it,
+# same as it is for the exact Linux runtime dependency list.
+
+name: Native Release
+
+on:
+  push:
+    tags:
+      - "native-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+            guide-history-service/target
+          key: native-linux-cargo-${{ hashFiles('native/Cargo.lock', 'guide-history-service/Cargo.lock') }}
+
+      - uses: taiki-e/install-action@cargo-deb
+
+      - name: Build dvrdesk-native
+        run: cargo build --release --manifest-path native/Cargo.toml
+
+      - name: Build guide-history-service
+        run: cargo build --release --manifest-path guide-history-service/Cargo.toml
+
+      - name: Package .deb
+        run: cargo deb --no-build --manifest-path native/Cargo.toml
+
+      - name: Package guide-history-service
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -C guide-history-service/target/release -czf \
+            dist/guide-history-service-linux-x86_64.tar.gz guide-history-service
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp native/target/debian/*.deb dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+            guide-history-service/target
+          key: native-windows-cargo-${{ hashFiles('native/Cargo.lock', 'guide-history-service/Cargo.lock') }}
+
+      - name: Build dvrdesk-native
+        run: cargo build --release --manifest-path native/Cargo.toml
+
+      - name: Build guide-history-service
+        run: cargo build --release --manifest-path guide-history-service/Cargo.toml
+
+      # mpv/libmpv is deliberately NOT bundled here — see this file's header
+      # comment for why (the one convenient prebuilt Windows libmpv source
+      # checked out is GPL-licensed, confirmed directly from its own build
+      # scripts, and redistributing it inside this app's .zip isn't a call
+      # to make silently). Ship a short README pointing the user at getting
+      # mpv themselves instead, matching the Linux .deb's `Depends:
+      # libmpv2` in spirit if not in mechanism.
+      - name: Write Windows README
+        shell: pwsh
+        run: |
+          # A PowerShell here-string's closing `"@` must be the first two
+          # characters on its line — indenting it to match this YAML block
+          # (as a naive multi-line string would) breaks that, so this is
+          # built as a plain joined array instead.
+          $lines = @(
+            "DVRDesk Native for Windows",
+            "===========================",
+            "",
+            "This app needs mpv (specifically mpv-2.dll or libmpv-2.dll) to play",
+            "video. It is not bundled with this download.",
+            "",
+            "To install it:",
+            "  winget install mpv-player.mpv-CI",
+            "or download a build from https://mpv.io/installation/ and copy",
+            "mpv-2.dll into this same folder, next to dvrdesk-native.exe."
+          )
+          $lines -join "`n" | Set-Content -Path native/target/release/README-Windows.txt
+
+      - name: Package dvrdesk-native
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path native/target/release/dvrdesk-native.exe, native/target/release/README-Windows.txt `
+            -DestinationPath dist/DVRDesk-Native-Windows-x86_64.zip -Force
+
+      - name: Package guide-history-service
+        shell: pwsh
+        run: |
+          Compress-Archive -Path guide-history-service/target/release/guide-history-service.exe `
+            -DestinationPath dist/guide-history-service-windows-x86_64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#native-v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+          merge-multiple: true
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -la staging/
+          TITLE="DVRDesk Native ${VERSION}"
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --draft \
+              --target "${GITHUB_SHA}" \
+              --title "$TITLE" \
+              --notes "Built from ${GITHUB_SHA}."
+          fi
+          gh release upload "${GITHUB_REF_NAME}" staging/* --clobber

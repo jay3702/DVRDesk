@@ -1,6 +1,6 @@
 [package]
 name = "dvrdesk-native"
-version = "2.0.0"
+version = "2.0.1"
 description = "DVRDesk native (Rust + egui + libmpv) — Channels DVR desktop client"
 edition = "2021"
 
@@ -25,3 +25,23 @@ quick-xml = "0.36"
 
 [profile.dev]
 opt-level = 1
+
+# `cargo deb` packaging — see .github/workflows/native-release.yml for how
+# this gets built and shipped. `depends` is the one runtime library this app
+# actually needs from the system: libmpv is loaded dynamically (`libloading`,
+# see `src/player/mpv_sys.rs`), never linked at compile time, so this is the
+# only entry that needs to be here — X11/Wayland/GL are loaded the same
+# dynamic way by `winit` and are already present on any real Linux desktop,
+# confirmed via `ldd` on a real build showing nothing beyond libc linked.
+[package.metadata.deb]
+maintainer = "Jay Ward <jay@thewards.net>"
+copyright = "2026, Jay Ward"
+extended-description = "A native Rust/egui/libmpv desktop client for Channels DVR."
+depends = "libmpv2"
+section = "video"
+priority = "optional"
+assets = [
+    ["target/release/dvrdesk-native", "usr/bin/", "755"],
+    ["packaging/linux/dvrdesk-native.desktop", "usr/share/applications/", "644"],
+    ["../src-tauri/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/dvrdesk-native.png", "644"],
+]

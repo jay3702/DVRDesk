@@ -772,6 +772,12 @@ pub fn show(
 
         ui.heading("About");
         ui.label(format!("DVRDesk (native) v{}", env!("CARGO_PKG_VERSION")));
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("This rewrite's playback architecture and several of its v2 features were inspired by");
+            ui.hyperlink_to("Clicker", "https://github.com/mackid1993/Clicker");
+            ui.label(", mackid1993's own native Channels DVR client — thank you for building it and keeping it open.");
+        });
     });
 
     action
