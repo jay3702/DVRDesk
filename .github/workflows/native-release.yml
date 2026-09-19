@@ -190,10 +190,27 @@ jobs:
           ls -la staging/
           TITLE="DVRDesk Native ${VERSION}"
           if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            # Created *without* --draft on purpose, then immediately
+            # flipped to draft — confirmed the hard way (native-v2.0.1's
+            # own first real run) that `gh release create --draft
+            # <existing-tag>` never actually binds to that tag: GitHub
+            # gives every draft an `untagged-<hash>` placeholder identity
+            # regardless, only resolving the real tag at publish time.
+            # This is a documented, still-open GitHub CLI/API behavior
+            # (cli/cli#11589), not something this workflow was doing
+            # wrong — the API request correctly carries `tag_name` and
+            # still comes back untagged. Creating it published (which
+            # binds to the tag immediately) and then editing it back to
+            # draft is the only way to get a real, correctly tag-bound
+            # release object. This does mean the release is briefly live
+            # and public for the few seconds between these two commands —
+            # a real, deliberate tradeoff, not an oversight, and the
+            # reason this two-step dance exists instead of a single
+            # `--draft` create.
             gh release create "${GITHUB_REF_NAME}" \
-              --draft \
               --target "${GITHUB_SHA}" \
               --title "$TITLE" \
               --notes "Built from ${GITHUB_SHA}."
+            gh release edit "${GITHUB_REF_NAME}" --draft
           fi
           gh release upload "${GITHUB_REF_NAME}" staging/* --clobber
