@@ -488,9 +488,12 @@ pub fn show(
         Loaded::Ready(c) => c,
     };
 
+    // Encrypted (DRM-locked) channels can never actually play, so they're
+    // suppressed alongside explicitly-hidden ones and surfaced under the
+    // same "show hidden channels" toggle rather than a separate setting.
     let unhidden: Vec<&Channel> = channels
         .iter()
-        .filter(|c| show_hidden || !c.hidden)
+        .filter(|c| show_hidden || (!c.hidden && !c.encrypted))
         .collect();
 
     // Distinct (name, id) pairs, not just distinct names — see

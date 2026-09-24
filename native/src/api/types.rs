@@ -160,9 +160,12 @@ pub struct Video {
 
 /// `/api/v1/channels` — confirmed via curl that `favorited`/`hd`/`hidden`
 /// are only present on *some* channels (absent = false via `#[serde(default)]`).
-/// Deliberately not merging in the DVR guide's separate favorites/hidden
-/// sets or secondary logo map the old app also consulted — a known
-/// simplification for this pass, not because the data doesn't matter.
+/// Deliberately not merging in the DVR guide's separate favorites set or
+/// secondary logo map the old app also consulted — a known simplification
+/// for this pass, not because the data doesn't matter. `encrypted` is the
+/// one exception: it's merged in from that same guide endpoint by
+/// `fetch_channels()` since it has no equivalent in this response at all
+/// (see that function's doc comment).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Channel {
     pub id: String,
@@ -185,6 +188,15 @@ pub struct Channel {
     /// direct `logo_url` — matches the old app's `channelLogoUrl()`.
     #[serde(default)]
     pub station_id: Option<String>,
+    /// Not part of `/api/v1/channels` — never populated by `serde`. Set
+    /// after the fact by `fetch_channels()` from the separate
+    /// `/dvr/guide/channels` admin endpoint, the only place the server
+    /// exposes per-channel DRM status. HDHomeRun Prime (and other
+    /// CableCARD) sources report plenty of channels as DRM-locked that the
+    /// server still lists as tunable; those can never actually play, so
+    /// they're treated the same as a hidden channel in the Live TV filter.
+    #[serde(default, skip_deserializing)]
+    pub encrypted: bool,
 }
 
 impl Recording {

@@ -6,7 +6,9 @@
 //! URL reliably on its own, so that whole defensive-probing layer isn't
 //! needed here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use serde::Deserialize;
 
 use super::types::Channel;
 
@@ -20,9 +22,73 @@ pub async fn fetch_channels(server_url: &str) -> Result<Vec<Channel>, String> {
     if !resp.status().is_success() {
         return Err(format!("API error {}: GET /api/v1/channels", resp.status()));
     }
-    resp.json::<Vec<Channel>>()
+    let mut channels = resp
+        .json::<Vec<Channel>>()
         .await
-        .map_err(|e| format!("Failed to parse channels response: {e}"))
+        .map_err(|e| format!("Failed to parse channels response: {e}"))?;
+
+    // Best-effort: `/dvr/guide/channels` is the only endpoint that reports
+    // per-channel DRM status (confirmed via `curl` — `/api/v1/channels`
+    // never includes it). A failure here just means encrypted channels
+    // stay unflagged, not that the whole channel list fails to load.
+    if let Ok(encrypted) = fetch_encrypted_channel_keys(base).await {
+        for ch in &mut channels {
+            let id = ch.id.trim().to_lowercase();
+            let number = ch.number.trim().to_lowercase();
+            ch.encrypted = encrypted.contains(&id) || encrypted.contains(&number);
+        }
+    }
+
+    Ok(channels)
+}
+
+/// Entry shape of `/dvr/guide/channels`'s `{channelKey: entry}` map — the
+/// admin UI's own source for the "DRM" badge it shows on CableCARD
+/// channels (confirmed by extracting the field names straight out of the
+/// server's own `bundle.js`, since this endpoint isn't in the public API
+/// docs). Only the fields needed to match back to an `/api/v1/channels`
+/// `Channel` and read its DRM flag are kept.
+#[derive(Debug, Deserialize)]
+struct GuideChannelEntry {
+    #[serde(rename = "ID", default)]
+    id: Option<String>,
+    #[serde(rename = "ChannelID", default)]
+    channel_id: Option<String>,
+    #[serde(rename = "Number", default)]
+    number: Option<String>,
+    #[serde(rename = "DRM", default)]
+    drm: bool,
+}
+
+/// Lowercased `id`/`ChannelID`/`Number` keys of every DRM-flagged channel,
+/// used to enrich `Channel::encrypted` post-fetch since the flag lives on
+/// a completely separate endpoint from the channel list itself.
+async fn fetch_encrypted_channel_keys(base: &str) -> Result<HashSet<String>, String> {
+    let url = format!("{base}/dvr/guide/channels");
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Network error reaching {base}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("API error {}: GET /dvr/guide/channels", resp.status()));
+    }
+    let guide = resp
+        .json::<HashMap<String, GuideChannelEntry>>()
+        .await
+        .map_err(|e| format!("Failed to parse /dvr/guide/channels response: {e}"))?;
+
+    let mut keys = HashSet::new();
+    for entry in guide.into_values() {
+        if !entry.drm {
+            continue;
+        }
+        for key in [entry.id, entry.channel_id, entry.number].into_iter().flatten() {
+            let key = key.trim().to_lowercase();
+            if !key.is_empty() {
+                keys.insert(key);
+            }
+        }
+    }
+    Ok(keys)
 }
 
 /// Confirmed this session that this assumption from the original plan was
