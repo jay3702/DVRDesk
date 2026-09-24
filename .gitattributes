@@ -1,0 +1,5 @@
+# Normalize line endings so the repo behaves the same on Linux and Windows.
+* text=auto
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
