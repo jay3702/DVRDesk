@@ -12,6 +12,24 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native (unreleased, after v2.0.1)
+
+### 2026-09-24 - Native: automatic 1.x settings import on Windows
+
+- Request: let the native client pick up a 1.x (Tauri) install's settings on Windows without the manual "Copy Settings for Migration" / paste step. Until now the direct read in `native/src/migration.rs` was Linux-only, so on Windows the "Import Automatically" button never appeared.
+- Where the old app's data is: WebView2 keeps localStorage in a Chromium LevelDB store at `%LOCALAPPDATA%\com.jay.winchannels\EBWebView\Default\Local Storage\leveldb`. The installed app's origin is `http://tauri.localhost`. Keys under `http://localhost:1420` come from the Vite dev server and are skipped on purpose, the same as the Linux path. A near-empty `%LOCALAPPDATA%\com.jay.dvrdesk` WebView2 dir also exists on the dev machine. It holds no settings and is ignored.
+- Solution:
+  - Windows reader uses `rusty-leveldb` (pure Rust, handles Snappy). It's a Windows-only dependency (`[target.'cfg(windows)'.dependencies]`), so Linux builds don't compile it.
+  - The LevelDB dir is copied to a temp dir without `LOCK` before opening. Opening a LevelDB writes to it (log recovery, new manifest), and the copy also lets the import work while the old app is running.
+  - Chromium's encoding is decoded by hand. Keys are `_<origin>\0<tag><key>` and values are `<tag><bytes>`, where tag `0` = UTF-16LE and `1` = Latin-1.
+  - Both platforms now load the whole store into a key→value map (`read_legacy_store` dispatches to `read_leveldb_store` or `read_sqlite_store`). The parsing and `apply()` merge are unchanged.
+- Symptom found during testing (not a bug): a server the user expected, halehollandct at 192.168.3.150, didn't come over. A separate throwaway LevelDB dumper that listed every stored version of each key showed there was never a separate halehollandct entry. It had always been the `default` server. In the installed app that entry's URL had been changed to `localhost:8089` (seq 1385, Jul 17), while `192.168.3.150` only ever existed under the dev-server origin. The importer faithfully copied what the installed app had saved. Fixed by correcting the URL in the installed 1.x app and re-importing.
+- Validation:
+  - On Windows against a real 1.x install: imported both servers with Tailscale URLs and the active server id. After fixing the URL in 1.x, cleared the native settings (`%APPDATA%\jay\dvrdesk-native\config\settings.json` moved aside) and re-imported successfully.
+  - `sqlite_store_decodes_webkitgtk_layout` unit test builds a WebKitGTK-shaped SQLite file (TEXT keys, UTF-16LE BLOB values) and reads it back. The Linux reader now compiles on every platform, so this test runs on Windows too.
+  - `legacy_store_reads_real_install` (`#[ignore]`) reads whatever real old-app store the machine has, on either platform: `cargo test legacy_store -- --ignored --nocapture`.
+- Still to do on Linux: a real Linux build plus the ignored real-install test against a Linux 1.x install, since the SQLite path was refactored and only unit-tested from Windows. macOS isn't a release target for either app, so there's no direct-read path for it.
+
 ## v1.14.11
 
 ### 2026-07-21 - Fix infinite self-heal restart loop introduced in v1.14.10

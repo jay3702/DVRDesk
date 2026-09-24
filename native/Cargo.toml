@@ -24,6 +24,11 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 quick-xml = "0.36"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
+# Reads the old Tauri app's WebView2 localStorage for the settings import
+# (`src/migration.rs`). Windows only — Linux reads WebKitGTK's SQLite instead.
+[target.'cfg(windows)'.dependencies]
+rusty-leveldb = "4.0.1"
+
 [profile.dev]
 opt-level = 1
 
