@@ -42,6 +42,7 @@ export async function buildTauriHlsLoader(): Promise<LoaderClass | undefined> {
     context: LoaderContext | null = null;
     stats: LoaderStats = makeStats();
     private aborted = false;
+    private controller: AbortController | null = null;
 
     // hls.js requires constructor to accept HlsConfig even if unused
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -49,7 +50,7 @@ export async function buildTauriHlsLoader(): Promise<LoaderClass | undefined> {
 
     load(
       context: LoaderContext,
-      _config: LoaderConfiguration,
+      config: LoaderConfiguration,
       callbacks: LoaderCallbacks<LoaderContext>,
     ): void {
       this.context = context;
@@ -75,9 +76,27 @@ export async function buildTauriHlsLoader(): Promise<LoaderClass | undefined> {
       // (fMP4 streams that genuinely need byte ranges would also need the DVR
       // server to support them, which it doesn't.)
 
+      // hls.js's own retry policy (manifestLoadPolicy/fragLoadPolicy) re-invokes
+      // load() on error, but that only helps if onError actually fires. Without
+      // a timeout, a request that hangs at the network level (dropped
+      // connection, misbehaving proxy, etc.) leaves this promise pending
+      // forever — the player just spins with no error and no retry. Use
+      // hls.js's own per-load-type timeout (falling back to a sane default)
+      // to turn a hang into a normal, retryable onError.
+      const timeoutMs = config.timeout > 0 ? config.timeout : 20_000;
+      // A real AbortController, not just the `aborted` flag: when hls.js calls
+      // abort() (e.g. rapid retries during a buffer-hole nudge storm), the
+      // underlying Tauri fetch must actually be cancelled so its native-side
+      // response resource is released promptly. Leaving it to resolve/reject
+      // on its own after the loader has moved on is what was producing the
+      // "resource id N is invalid" rejections under heavy retry churn.
+      const controller = new AbortController();
+      this.controller = controller;
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+
       void (async () => {
         try {
-          const res = await tauriFetch(context.url, { method: 'GET', headers });
+          const res = await tauriFetch(context.url, { method: 'GET', headers, signal });
 
           if (this.aborted) return;
 
@@ -115,8 +134,11 @@ export async function buildTauriHlsLoader(): Promise<LoaderClass | undefined> {
           );
         } catch (e) {
           if (this.aborted) return;
+          const text = signal.aborted
+            ? `Request timed out after ${timeoutMs}ms`
+            : String(e);
           callbacks.onError(
-            { code: 0, text: String(e) },
+            { code: 0, text },
             context,
             null,
             this.stats,
@@ -128,6 +150,7 @@ export async function buildTauriHlsLoader(): Promise<LoaderClass | undefined> {
     abort(): void {
       this.aborted = true;
       this.stats.aborted = true;
+      this.controller?.abort();
     }
 
     destroy(): void {

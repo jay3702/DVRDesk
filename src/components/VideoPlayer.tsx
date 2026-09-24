@@ -538,6 +538,32 @@ export default function VideoPlayer() {
       let stallCheckIntervalId: ReturnType<typeof setInterval> | null = null;
       let liveRecoveryIntervalId: ReturnType<typeof setInterval> | null = null;
       let liveRecoveryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      // Recordings get no self-heal today (that's all isLive-gated below), so a
+      // request that hangs before MANIFEST_PARSED — e.g. a proxied/blocked
+      // connection on Linux — otherwise leaves the player spinning forever
+      // with nothing logged. Surface it as a normal, closeable error instead.
+      let manifestParsed = false;
+      let hadFatalError = false;
+      // hls.recoverMediaError() detaches/reattaches the MediaSource — fine
+      // once, but a genuinely corrupt/gappy segment can make hls.js call it
+      // dozens of times per second in a tight loop (currentTime never
+      // advances, the same non-fatal error just keeps firing). Observed on
+      // this Linux/WebKitGTK setup: hammering recoverMediaError() that fast
+      // crashes the WebKitWebProcess (confirmed via systemd-coredump — the
+      // GStreamer pipeline can't settle one flush/reattach before the next
+      // arrives). Cap retries at a fixed position and fail cleanly instead.
+      let mediaErrorRecoveryCount = 0;
+      let mediaErrorRecoveryWindowStart = 0;
+      let lastRecoveryTime = -1;
+      const MAX_RECOVERIES_AT_SAME_POSITION = 4;
+      const manifestWatchdogId: ReturnType<typeof setTimeout> = setTimeout(() => {
+        if (cancelled || manifestParsed || hadFatalError) return;
+        setError(
+          `Playback did not start within 15s.\n` +
+          `The manifest request may be hanging (check network/proxy settings).\n` +
+          `URL: ${activeManifestUrlRef.current}`
+        );
+      }, 15_000);
 
       void (async () => {
         // Use the Tauri loader whenever we're running inside Tauri (dev or prod)
@@ -605,6 +631,30 @@ export default function VideoPlayer() {
               data.details === 'bufferSeekOverHole' ||
               data.details === 'bufferStalledError')
           ) {
+            const currentT = vid ? vid.currentTime : -1;
+            const now = Date.now();
+            // Only count repeats that are genuinely stuck at the same spot;
+            // if playback has moved on since the last recovery, this is
+            // normal isolated-hole handling, not a stuck loop — reset.
+            if (now - mediaErrorRecoveryWindowStart > 5000 || currentT !== lastRecoveryTime) {
+              mediaErrorRecoveryWindowStart = now;
+              mediaErrorRecoveryCount = 0;
+            }
+            lastRecoveryTime = currentT;
+            mediaErrorRecoveryCount += 1;
+
+            if (mediaErrorRecoveryCount > MAX_RECOVERIES_AT_SAME_POSITION) {
+              if (!cancelled) {
+                hadFatalError = true;
+                setError(
+                  `Playback stalled at ${currentT.toFixed(2)}s and could not recover.\n` +
+                  `This recording likely has a corrupt or missing segment at this point.\n` +
+                  `Detail: ${data.details}`
+                );
+              }
+              return;
+            }
+
             hls.recoverMediaError();
             return;
           }
@@ -623,6 +673,7 @@ export default function VideoPlayer() {
           }
 
           if (data.fatal && !cancelled) {
+            hadFatalError = true;
             const status = data.response?.code ? ` (HTTP ${data.response.code})` : '';
             const errUrl = data.url ?? activeManifestUrlRef.current;
             setError(
@@ -637,6 +688,8 @@ export default function VideoPlayer() {
         hls.loadSource((preferRemux && !isLive) ? remuxSrc : src);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+          manifestParsed = true;
+          clearTimeout(manifestWatchdogId);
           if (!cancelled) {
             // Lock to the best available quality level by bitrate.
             // ABR relies on bandwidth samples from the loader; the Tauri HTTP
@@ -886,6 +939,7 @@ export default function VideoPlayer() {
 
       return () => {
         cancelled = true;
+        clearTimeout(manifestWatchdogId);
         if (stallCheckIntervalId !== null) { clearInterval(stallCheckIntervalId); stallCheckIntervalId = null; }
         if (liveRecoveryIntervalId !== null) { clearInterval(liveRecoveryIntervalId); liveRecoveryIntervalId = null; }
         if (liveRecoveryTimeoutId !== null) { clearTimeout(liveRecoveryTimeoutId); liveRecoveryTimeoutId = null; }

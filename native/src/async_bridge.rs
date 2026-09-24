@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use tokio::runtime::Runtime;
 
 pub enum Msg {
+    UpdateCheckResult(Result<Option<crate::api::github::UpdateInfo>, String>),
     ProbeResult {
         server_id: String,
         reachable: bool,
@@ -54,7 +55,16 @@ pub enum Msg {
     SearchEpisodesLoaded(Result<Vec<crate::api::types::Recording>, String>),
     SearchMoviesLoaded(Result<Vec<crate::api::types::Recording>, String>),
     SearchVideosLoaded(Result<Vec<crate::api::types::Video>, String>),
-    ChannelsLoaded(Result<Vec<crate::api::types::Channel>, String>),
+    /// `server_id` is the active server *at the time this fetch was
+    /// spawned* — checked against the still-current active server before
+    /// applying, so a slow response from a server the user has since
+    /// switched away from (and back from) can't clobber the right one's
+    /// data. See `switch_active_server`'s doc comment for the race this
+    /// guards against.
+    ChannelsLoaded {
+        server_id: String,
+        result: Result<Vec<crate::api::types::Channel>, String>,
+    },
     /// Separate from `ChannelsLoaded` (Live's own fetch) — Recent fetches
     /// its own copy purely to build a channel-logo lookup for list rows.
     RecentChannelsLoaded(Result<Vec<crate::api::types::Channel>, String>),
@@ -75,12 +85,23 @@ pub enum Msg {
         id: String,
         result: Result<(), String>,
     },
-    GuideLoaded(Result<Vec<crate::api::guide::GuideProgram>, String>),
-    GuideJobsLoaded(Result<Vec<crate::api::guide::Job>, String>),
-    GuideRulesLoaded(Result<Vec<crate::api::guide::Rule>, String>),
-    GuideRecordedLoaded(
-        Result<std::collections::HashMap<String, crate::api::guide::ProgramStatus>, String>,
-    ),
+    /// See `ChannelsLoaded`'s doc comment — same stale-server guard.
+    GuideLoaded {
+        server_id: String,
+        result: Result<Vec<crate::api::guide::GuideProgram>, String>,
+    },
+    GuideJobsLoaded {
+        server_id: String,
+        result: Result<Vec<crate::api::guide::Job>, String>,
+    },
+    GuideRulesLoaded {
+        server_id: String,
+        result: Result<Vec<crate::api::guide::Rule>, String>,
+    },
+    GuideRecordedLoaded {
+        server_id: String,
+        result: Result<std::collections::HashMap<String, crate::api::guide::ProgramStatus>, String>,
+    },
     GuideHistoryLoaded(Result<Vec<crate::api::guide::GuideProgram>, String>),
     HistoryServiceProbeResult(Result<(), String>),
     /// Delivered when a past guide slot's recorded-status hit resolves to a
@@ -95,7 +116,10 @@ pub enum Msg {
     /// it directly (unlike `PastRecordingLoaded`, which navigates to a
     /// detail screen instead).
     PlayFetchedRecording(Result<crate::api::types::Recording, String>),
-    GuideDefaultPaddingLoaded(Result<(i64, i64), String>),
+    GuideDefaultPaddingLoaded {
+        server_id: String,
+        result: Result<(i64, i64), String>,
+    },
     /// The dialog's `channel`/`time` are carried along so a stale response
     /// (the user closed this program's dialog and opened a different one
     /// before the lookup finished) can be safely ignored instead of

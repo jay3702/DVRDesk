@@ -18,6 +18,7 @@
 //! at all — see the plan's §5 findings).
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use crate::deploy::{DeployStatus, Deploys};
 use crate::state::settings::{
@@ -51,6 +52,18 @@ pub struct SettingsState {
     draft_deploy_targets: Vec<DeployTarget>,
     deploy_error: Option<String>,
     deploy_targets_saved: bool,
+
+    migration_draft: String,
+    migration_result: Option<Result<String, String>>,
+    /// Computed once when this screen is created — see
+    /// `migration::detect_legacy_install()`. `None` means no old-app
+    /// installation was found on this machine (or this platform doesn't
+    /// support direct detection yet — Linux only for now).
+    detected_legacy_path: Option<PathBuf>,
+    /// Result of the "Import Automatically" button — kept separate from
+    /// `migration_result` (the paste path) so the two don't overwrite each
+    /// other's message.
+    legacy_import_result: Option<Result<String, String>>,
 }
 
 struct KbText {
@@ -119,6 +132,11 @@ impl SettingsState {
             draft_deploy_targets: settings.guide_deploy_targets.clone(),
             deploy_error: None,
             deploy_targets_saved: false,
+
+            migration_draft: String::new(),
+            migration_result: None,
+            detected_legacy_path: crate::migration::detect_legacy_install(),
+            legacy_import_result: None,
         }
     }
 
@@ -237,6 +255,86 @@ pub fn show(
         {
             action.settings_changed = true;
         }
+        ui.add_space(8.0);
+        ui.separator();
+
+        let import_frame = if settings.servers.is_empty() {
+            egui::Frame::group(ui.style()).fill(ui.visuals().warn_fg_color.gamma_multiply(0.08))
+        } else {
+            egui::Frame::group(ui.style())
+        };
+        import_frame.show(ui, |ui| {
+            ui.heading("Import from DVRDesk (legacy)");
+
+            if state.detected_legacy_path.is_some() {
+                ui.colored_label(egui::Color32::GREEN, "Found an existing DVRDesk installation on this machine.");
+                if ui.button("Import Automatically").clicked() {
+                    let result = crate::migration::import_from_legacy_install(settings);
+                    if result.is_ok() {
+                        action.settings_changed = true;
+                        // Same reasoning as the paste path below — resync
+                        // the draft caches this screen edits in-place so
+                        // the import shows up immediately.
+                        state.draft_servers = settings.servers.clone();
+                        state.kb_text = KbText::from_config(&settings.keybindings);
+                        state.skip_draft = settings.skip_intervals;
+                    }
+                    state.legacy_import_result = Some(result);
+                }
+                match &state.legacy_import_result {
+                    Some(Ok(msg)) => {
+                        ui.colored_label(egui::Color32::GREEN, msg);
+                    }
+                    Some(Err(e)) => {
+                        ui.colored_label(egui::Color32::RED, e);
+                    }
+                    None => {}
+                }
+                ui.add_space(6.0);
+                ui.label("Or paste settings copied from a different machine:");
+            } else {
+                ui.label(
+                    "In the old DVRDesk app, go to Settings and click \"Copy Settings for Migration\", then paste the result below.",
+                );
+            }
+            ui.add(
+                egui::TextEdit::multiline(&mut state.migration_draft)
+                    .desired_rows(3)
+                    .hint_text("Paste the copied JSON here…"),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("Import").clicked() {
+                    let result = crate::migration::import(settings, &state.migration_draft);
+                    if result.is_ok() {
+                        action.settings_changed = true;
+                        state.migration_draft.clear();
+                        // Re-sync the draft caches this screen edits
+                        // in-place (servers/keybindings/skip-intervals all
+                        // follow a draft-then-Save pattern, unlike the
+                        // scalar toggles above which bind straight to
+                        // `settings`) so the import is visible immediately
+                        // instead of only after a restart.
+                        state.draft_servers = settings.servers.clone();
+                        state.kb_text = KbText::from_config(&settings.keybindings);
+                        state.skip_draft = settings.skip_intervals;
+                    }
+                    state.migration_result = Some(result);
+                }
+                if !state.migration_draft.is_empty() && ui.button("Clear").clicked() {
+                    state.migration_draft.clear();
+                    state.migration_result = None;
+                }
+            });
+            match &state.migration_result {
+                Some(Ok(msg)) => {
+                    ui.colored_label(egui::Color32::GREEN, msg);
+                }
+                Some(Err(e)) => {
+                    ui.colored_label(egui::Color32::RED, e);
+                }
+                None => {}
+            }
+        });
         ui.add_space(8.0);
         ui.separator();
 

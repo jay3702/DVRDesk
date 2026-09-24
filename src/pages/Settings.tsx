@@ -9,55 +9,11 @@ import {
   probeUrl,
 } from '../api/client';
 import { getRecentClientErrorLogText } from '../lib/clientErrorLog';
+import { fetchLatestRelease, isVersionNewer, type UpdateInfo } from '../lib/updateCheck';
 import './Page.css';
 
 function makeServerId(): string {
   return `srv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-interface UpdateInfo {
-  latestVersion: string;
-  latestUrl: string;
-}
-
-function parseVersionParts(version: string): number[] {
-  return version
-    .replace(/^v/i, '')
-    .split(/[.-]/)
-    .map((part) => Number.parseInt(part, 10))
-    .map((value) => (Number.isFinite(value) ? value : 0));
-}
-
-function isVersionNewer(latest: string, current: string): boolean {
-  const a = parseVersionParts(latest);
-  const b = parseVersionParts(current);
-  const maxLen = Math.max(a.length, b.length);
-  for (let i = 0; i < maxLen; i += 1) {
-    const av = a[i] ?? 0;
-    const bv = b[i] ?? 0;
-    if (av > bv) return true;
-    if (av < bv) return false;
-  }
-  return false;
-}
-
-async function fetchLatestRelease(): Promise<UpdateInfo | null> {
-  try {
-    const response = await fetch('https://api.github.com/repos/jay3702/dvrdesk/releases/latest', {
-      headers: { Accept: 'application/vnd.github+json' },
-    });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as {
-      tag_name?: string;
-      html_url?: string;
-    };
-    const latestVersion = String(payload.tag_name ?? '').trim();
-    const latestUrl = String(payload.html_url ?? '').trim();
-    if (!latestVersion || !latestUrl) return null;
-    return { latestVersion, latestUrl };
-  } catch {
-    return null;
-  }
 }
 
 interface BuildBugReportDraftInput {
@@ -155,6 +111,7 @@ export default function Settings() {
   const {
     servers,
     setServers,
+    activeServerId,
     storageSharePath,
     setStorageSharePath,
     preferRemux,
@@ -190,6 +147,7 @@ export default function Settings() {
   const [logViewOpen, setLogViewOpen] = useState(false);
   const [logViewText, setLogViewText] = useState('');
   const [reportCopyMessage, setReportCopyMessage] = useState<string | null>(null);
+  const [migrationCopyMessage, setMigrationCopyMessage] = useState<string | null>(null);
   const [bindingsDraft, setBindingsDraft] = useState<KeybindingsConfig>(keybindings);
   const [intervalsDraft, setIntervalsDraft] = useState<SkipIntervalsConfig>(skipIntervals);
   const [playerSettingsSaved, setPlayerSettingsSaved] = useState(false);
@@ -418,6 +376,46 @@ export default function Settings() {
       setReportCopyMessage('Unable to copy automatically. Select the text and copy it manually.');
     }
     setTimeout(() => setReportCopyMessage(null), 3500);
+  }
+
+  async function copyMigrationSettings() {
+    // Deliberately excludes storageSharePath/preferRemux — both dropped in
+    // DVRDesk Native (SRT-sidecar and HLS-remux concepts native doesn't use).
+    const payload = {
+      dvrdesk_migration_version: 1,
+      servers: servers.map((s) => ({
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        ...(s.tailscaleUrl ? { tailscale_url: s.tailscaleUrl } : {}),
+      })),
+      active_server_id: activeServerId,
+      diagnostics_enabled: diagnosticsEnabled,
+      show_hidden_live_channels: showHiddenLiveChannels,
+      keybindings: {
+        skip_forward: keybindings.skipForward,
+        skip_back: keybindings.skipBack,
+        fast_forward: keybindings.fastForward,
+        fast_reverse: keybindings.fastReverse,
+        play_pause: keybindings.playPause,
+        close: keybindings.close,
+      },
+      skip_intervals: {
+        skip_forward: skipIntervals.skipForward,
+        skip_back: skipIntervals.skipBack,
+        fast_forward: skipIntervals.fastForward,
+        fast_reverse: skipIntervals.fastReverse,
+      },
+      theme,
+      window_always_on_top: windowAlwaysOnTop,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setMigrationCopyMessage('Settings copied to clipboard. Paste them into DVRDesk Native’s Settings screen to import.');
+    } catch {
+      setMigrationCopyMessage('Unable to copy automatically. Select the text and copy it manually.');
+    }
+    setTimeout(() => setMigrationCopyMessage(null), 5000);
   }
 
   return (
@@ -731,6 +729,19 @@ export default function Settings() {
               <a className="settings-link" href={updateInfo.latestUrl} target="_blank" rel="noreferrer">Open releases</a>
             </p>
           )}
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section__title">Migrate to DVRDesk Native</h2>
+          <p className="settings-hint">
+            DVRDesk Native is a ground-up rewrite with a much more reliable playback engine. Copy your servers and preferences here, then paste them into DVRDesk Native's Settings screen to bring them over without re-entering anything.
+          </p>
+          <div className="settings-row">
+            <button className="settings-save-btn" onClick={() => { void copyMigrationSettings(); }}>
+              Copy Settings for Migration
+            </button>
+          </div>
+          {migrationCopyMessage && <p className="settings-hint settings-hint--ok">{migrationCopyMessage}</p>}
         </section>
       </div>
 

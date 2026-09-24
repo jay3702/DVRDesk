@@ -82,6 +82,14 @@ pub struct App {
     /// pass-management UI to link to.
     pending_pass_notice: Option<String>,
 
+    /// `Some` once a genuinely newer `native-v*` release is found — see
+    /// `api/github.rs`'s doc comment for why this is scoped to that tag
+    /// prefix specifically rather than trusting GitHub's own "latest"
+    /// notion. Checked once, fired from `App::new()`, not gated behind any
+    /// particular screen since it's shown globally like `pending_pass_notice`.
+    update_info: Option<crate::api::github::UpdateInfo>,
+    update_dismissed: bool,
+
     downloads: crate::downloads::Downloads,
     deploys: crate::deploy::Deploys,
     channel_genres: crate::channel_genres::ChannelGenres,
@@ -123,6 +131,18 @@ impl App {
             crate::paths::data_dir().map(|d| d.join("channel_genres.json")),
         );
 
+        // Fired once, unconditionally — not gated behind any screen, same
+        // reasoning as the old Tauri app's own equivalent `useEffect`
+        // (runs once on mount regardless of which route is active).
+        {
+            let tx = bridge.tx.clone();
+            let ctx = cc.egui_ctx.clone();
+            bridge.runtime.spawn(async move {
+                let result = api::github::fetch_update_info().await;
+                async_bridge::send_and_repaint(&tx, &ctx, Msg::UpdateCheckResult(result));
+            });
+        }
+
         Self {
             settings,
             settings_ui,
@@ -160,6 +180,8 @@ impl App {
             show_stats: false,
 
             pending_pass_notice: None,
+            update_info: None,
+            update_dismissed: false,
 
             downloads,
             deploys,
@@ -469,6 +491,15 @@ impl App {
     fn drain_messages(&mut self, ctx: &egui::Context) {
         while let Ok(msg) = self.bridge.rx.try_recv() {
             match msg {
+                Msg::UpdateCheckResult(result) => {
+                    if let Ok(Some(info)) = result {
+                        self.update_info = Some(info);
+                    }
+                    // A failed/empty check is silently ignored, same as
+                    // the old app's own update-checker — nothing useful to
+                    // show the user either way, and this isn't worth an
+                    // error banner of its own.
+                }
                 Msg::ProbeResult {
                     server_id,
                     reachable,
@@ -562,12 +593,14 @@ impl App {
                         Err(e) => ui::Loaded::Err(e),
                     };
                 }
-                Msg::ChannelsLoaded(result) => {
-                    self.live.channels = match result {
-                        Ok(v) => ui::Loaded::Ready(v),
-                        Err(e) => ui::Loaded::Err(e),
-                    };
-                    self.seed_channel_genres_if_ready();
+                Msg::ChannelsLoaded { server_id, result } => {
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        self.live.channels = match result {
+                            Ok(v) => ui::Loaded::Ready(v),
+                            Err(e) => ui::Loaded::Err(e),
+                        };
+                        self.seed_channel_genres_if_ready();
+                    }
                 }
                 Msg::ShowsLoaded(result) => {
                     self.tv_shows.shows = match result {
@@ -639,24 +672,30 @@ impl App {
                         }
                     }
                 }
-                Msg::GuideLoaded(result) => {
-                    self.live.guide = match result {
-                        Ok(v) => ui::Loaded::Ready(v),
-                        Err(e) => ui::Loaded::Err(e),
-                    };
-                    self.seed_channel_genres_if_ready();
+                Msg::GuideLoaded { server_id, result } => {
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        self.live.guide = match result {
+                            Ok(v) => ui::Loaded::Ready(v),
+                            Err(e) => ui::Loaded::Err(e),
+                        };
+                        self.seed_channel_genres_if_ready();
+                    }
                 }
-                Msg::GuideJobsLoaded(result) => {
-                    self.live.jobs = match result {
-                        Ok(v) => ui::Loaded::Ready(v),
-                        Err(e) => ui::Loaded::Err(e),
-                    };
+                Msg::GuideJobsLoaded { server_id, result } => {
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        self.live.jobs = match result {
+                            Ok(v) => ui::Loaded::Ready(v),
+                            Err(e) => ui::Loaded::Err(e),
+                        };
+                    }
                 }
-                Msg::GuideRulesLoaded(result) => {
-                    self.live.rules = match result {
-                        Ok(v) => ui::Loaded::Ready(v),
-                        Err(e) => ui::Loaded::Err(e),
-                    };
+                Msg::GuideRulesLoaded { server_id, result } => {
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        self.live.rules = match result {
+                            Ok(v) => ui::Loaded::Ready(v),
+                            Err(e) => ui::Loaded::Err(e),
+                        };
+                    }
                 }
                 Msg::CollectionsLoaded(result) => {
                     self.collections.collections = match result {
@@ -677,18 +716,22 @@ impl App {
                         };
                     }
                 }
-                Msg::GuideRecordedLoaded(result) => {
-                    self.live.recorded = match result {
-                        Ok(v) => ui::Loaded::Ready(v),
-                        Err(e) => ui::Loaded::Err(e),
-                    };
+                Msg::GuideRecordedLoaded { server_id, result } => {
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        self.live.recorded = match result {
+                            Ok(v) => ui::Loaded::Ready(v),
+                            Err(e) => ui::Loaded::Err(e),
+                        };
+                    }
                 }
-                Msg::GuideDefaultPaddingLoaded(result) => {
+                Msg::GuideDefaultPaddingLoaded { server_id, result } => {
                     // Best-effort — a failure here just means the dialog
                     // falls back to its own hardcoded (0, 60) default
                     // rather than the server's configured one.
-                    if let Ok(padding) = result {
-                        self.live.default_padding = Some(padding);
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                        if let Ok(padding) = result {
+                            self.live.default_padding = Some(padding);
+                        }
                     }
                 }
                 Msg::GuideSeriesAiringLoaded {
@@ -834,6 +877,19 @@ impl App {
     /// immediately and the rest pick up the new server next time they're
     /// visited — and stops any active playback first, since it would
     /// otherwise keep streaming from a server that's no longer selected.
+    ///
+    /// Resetting to `Idle` alone isn't quite enough with more than one
+    /// server configured, though: switching to server B re-fetches Live's
+    /// channels/guide, but if the user switches back to server A *before*
+    /// B's fetch lands, B's response arrives after A is active again — and
+    /// with nothing tying that response to the server it was requested
+    /// for, it would silently overwrite A's live grid with B's channels
+    /// (confirmed as the cause of a real report: adding a second server
+    /// and clicking around it made the *first* server's live grid look
+    /// wrong). `Msg::ChannelsLoaded`/`GuideLoaded`/etc. carry the
+    /// `server_id` they were fetched for and their handlers drop the
+    /// result if it no longer matches `active_server_id`, the same guard
+    /// `EpisodesLoaded` already used for the equivalent per-show race.
     fn switch_active_server(&mut self, ctx: &egui::Context, new_id: String) {
         if self.settings.active_server_id.as_deref() == Some(new_id.as_str()) {
             return;
@@ -966,8 +1022,11 @@ impl App {
     }
 
     fn ensure_live_loaded(&mut self, ctx: &egui::Context) {
+        let active_server_id = self.settings.active_server_id.clone();
         if matches!(self.live.channels, ui::Loaded::Idle) {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 self.live.channels = ui::Loaded::Loading;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
@@ -976,57 +1035,83 @@ impl App {
                     if let Ok(channels) = &mut result {
                         api::live::resolve_station_logo_variants(channels, &server_url).await;
                     }
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::ChannelsLoaded(result));
+                    async_bridge::send_and_repaint(
+                        &tx,
+                        &ctx2,
+                        Msg::ChannelsLoaded { server_id, result },
+                    );
                 });
             }
         }
         if matches!(self.live.guide, ui::Loaded::Idle) {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 self.live.guide = ui::Loaded::Loading;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
                     let result =
                         api::guide::fetch_guide(&server_url, ui::live::GUIDE_DURATION_SECS).await;
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideLoaded(result));
+                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideLoaded { server_id, result });
                 });
             }
         }
         if matches!(self.live.jobs, ui::Loaded::Idle) {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 self.live.jobs = ui::Loaded::Loading;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
                     let result = api::guide::fetch_jobs(&server_url).await;
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideJobsLoaded(result));
+                    async_bridge::send_and_repaint(
+                        &tx,
+                        &ctx2,
+                        Msg::GuideJobsLoaded { server_id, result },
+                    );
                 });
             }
         }
         if matches!(self.live.rules, ui::Loaded::Idle) {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 self.live.rules = ui::Loaded::Loading;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
                     let result = api::guide::fetch_rules(&server_url).await;
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideRulesLoaded(result));
+                    async_bridge::send_and_repaint(
+                        &tx,
+                        &ctx2,
+                        Msg::GuideRulesLoaded { server_id, result },
+                    );
                 });
             }
         }
         if matches!(self.live.recorded, ui::Loaded::Idle) {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 self.live.recorded = ui::Loaded::Loading;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
                     let result = api::guide::fetch_recorded_status(&server_url).await;
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideRecordedLoaded(result));
+                    async_bridge::send_and_repaint(
+                        &tx,
+                        &ctx2,
+                        Msg::GuideRecordedLoaded { server_id, result },
+                    );
                 });
             }
         }
         if self.live.default_padding.is_none() {
-            if let Some(server_url) = self.active_server_url() {
+            if let (Some(server_id), Some(server_url)) =
+                (active_server_id.clone(), self.active_server_url())
+            {
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
@@ -1034,7 +1119,7 @@ impl App {
                     async_bridge::send_and_repaint(
                         &tx,
                         &ctx2,
-                        Msg::GuideDefaultPaddingLoaded(result),
+                        Msg::GuideDefaultPaddingLoaded { server_id, result },
                     );
                 });
             }
@@ -1773,6 +1858,28 @@ impl eframe::App for App {
 
         let play_rec = egui::CentralPanel::default()
             .show(ctx, |ui| {
+                if !self.update_dismissed {
+                    if let Some(info) = &self.update_info {
+                        let version = info.version.clone();
+                        let url = info.url.clone();
+                        egui::Frame::none()
+                            .fill(ui.visuals().hyperlink_color.gamma_multiply(0.15))
+                            .inner_margin(6.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!(
+                                        "New version available: {version} (current: v{})",
+                                        env!("CARGO_PKG_VERSION")
+                                    ));
+                                    ui.hyperlink_to("View release", &url);
+                                    if ui.small_button("✖").clicked() {
+                                        self.update_dismissed = true;
+                                    }
+                                });
+                            });
+                        ui.add_space(4.0);
+                    }
+                }
                 if let Some(notice) = self.pending_pass_notice.clone() {
                     egui::Frame::none()
                         .fill(ui.visuals().warn_fg_color.gamma_multiply(0.15))

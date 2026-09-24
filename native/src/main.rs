@@ -5,6 +5,7 @@ mod channel_genres;
 mod deploy;
 mod downloads;
 mod log;
+mod migration;
 mod paths;
 mod player;
 mod screen;

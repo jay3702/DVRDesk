@@ -1,5 +1,6 @@
 pub mod client;
 pub mod collections;
+pub mod github;
 pub mod guide;
 pub mod guide_history;
 pub mod library;
