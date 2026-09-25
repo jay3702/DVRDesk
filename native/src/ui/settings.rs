@@ -212,6 +212,16 @@ fn is_valid_server_url(url: &str) -> bool {
     }
 }
 
+/// A single-line text field at a fixed width. Plain `text_edit_singleline`
+/// inside a `Grid` is capped at the column's width from the previous frame,
+/// and in a non-last column that starts out as just the header label's
+/// width ("URL", "Key(s)"), so the field never grows and clips its contents.
+/// Allocating an explicit size breaks that loop and widens the column.
+fn text_field(ui: &mut egui::Ui, text: &mut String, width: f32) -> egui::Response {
+    let height = ui.spacing().interact_size.y;
+    ui.add_sized([width, height], egui::TextEdit::singleline(text))
+}
+
 fn new_server_id() -> String {
     format!(
         "srv_{}",
@@ -362,10 +372,10 @@ pub fn show(
                         // only `App` has a handle on.
                         action.switch_server = Some(server.id.clone());
                     }
-                    ui.text_edit_singleline(&mut server.name);
-                    ui.text_edit_singleline(&mut server.url);
+                    text_field(ui, &mut server.name, 160.0);
+                    text_field(ui, &mut server.url, 240.0);
                     let mut tailscale = server.tailscale_url.clone().unwrap_or_default();
-                    if ui.text_edit_singleline(&mut tailscale).changed() {
+                    if text_field(ui, &mut tailscale, 240.0).changed() {
                         server.tailscale_url = if tailscale.trim().is_empty() { None } else { Some(tailscale) };
                     }
                     ui.horizontal(|ui| {
@@ -495,32 +505,32 @@ pub fn show(
                 ui.end_row();
 
                 ui.label("Skip Forward");
-                ui.text_edit_singleline(&mut state.kb_text.skip_forward);
+                text_field(ui, &mut state.kb_text.skip_forward, 240.0);
                 ui.add(egui::DragValue::new(&mut state.skip_draft.skip_forward).range(1..=600));
                 ui.end_row();
 
                 ui.label("Skip Back");
-                ui.text_edit_singleline(&mut state.kb_text.skip_back);
+                text_field(ui, &mut state.kb_text.skip_back, 240.0);
                 ui.add(egui::DragValue::new(&mut state.skip_draft.skip_back).range(1..=600));
                 ui.end_row();
 
                 ui.label("Fast Forward");
-                ui.text_edit_singleline(&mut state.kb_text.fast_forward);
+                text_field(ui, &mut state.kb_text.fast_forward, 240.0);
                 ui.add(egui::DragValue::new(&mut state.skip_draft.fast_forward).range(1..=600));
                 ui.end_row();
 
                 ui.label("Fast Reverse");
-                ui.text_edit_singleline(&mut state.kb_text.fast_reverse);
+                text_field(ui, &mut state.kb_text.fast_reverse, 240.0);
                 ui.add(egui::DragValue::new(&mut state.skip_draft.fast_reverse).range(1..=600));
                 ui.end_row();
 
                 ui.label("Play / Pause");
-                ui.text_edit_singleline(&mut state.kb_text.play_pause);
+                text_field(ui, &mut state.kb_text.play_pause, 240.0);
                 ui.label("");
                 ui.end_row();
 
                 ui.label("Close Player");
-                ui.text_edit_singleline(&mut state.kb_text.close);
+                text_field(ui, &mut state.kb_text.close, 240.0);
                 ui.label("");
                 ui.end_row();
             });
@@ -561,15 +571,15 @@ pub fn show(
         );
         egui::Grid::new("storage_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             ui.label("Downloads folder:");
-            ui.text_edit_singleline(&mut state.download_dir_draft);
+            text_field(ui, &mut state.download_dir_draft, 400.0);
             ui.end_row();
 
             ui.label("Live buffer folder:");
-            ui.text_edit_singleline(&mut state.buffer_dir_draft);
+            text_field(ui, &mut state.buffer_dir_draft, 400.0);
             ui.end_row();
 
             ui.label("Cache/log folder:");
-            ui.text_edit_singleline(&mut state.cache_dir_draft);
+            text_field(ui, &mut state.cache_dir_draft, 400.0);
             ui.end_row();
 
             ui.label("Live buffer size cap:");

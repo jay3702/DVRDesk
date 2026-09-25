@@ -12,7 +12,14 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
-## Native (unreleased, after v2.0.1)
+## Native v2.1.0
+
+### 2026-09-24 - Native: Settings text fields clipped their contents
+
+- Symptom: the server Name/URL/Tailscale URL fields and the keybinding fields in Settings were too narrow and cut off what was typed in them.
+- Cause: in egui 0.29 a `TextEdit` inside a `Grid` is capped at the column's width from the previous frame. For a non-last column that starts as the header label's width ("URL", "Key(s)"), so the field never grows.
+- Solution: a `text_field` helper in `native/src/ui/settings.rs` allocates each field at a fixed size with `add_sized`, which also widens the column. Servers use 160/240px and keybindings 240px. Storage paths are 400px because the 280px default is short for real paths.
+- Validation: checked by eye in the running app on Linux.
 
 ### 2026-09-24 - Native: automatic 1.x settings import on Windows
 
@@ -28,7 +35,20 @@ This file adds the decision context that is usually missing from commit messages
   - On Windows against a real 1.x install: imported both servers with Tailscale URLs and the active server id. After fixing the URL in 1.x, cleared the native settings (`%APPDATA%\jay\dvrdesk-native\config\settings.json` moved aside) and re-imported successfully.
   - `sqlite_store_decodes_webkitgtk_layout` unit test builds a WebKitGTK-shaped SQLite file (TEXT keys, UTF-16LE BLOB values) and reads it back. The Linux reader now compiles on every platform, so this test runs on Windows too.
   - `legacy_store_reads_real_install` (`#[ignore]`) reads whatever real old-app store the machine has, on either platform: `cargo test legacy_store -- --ignored --nocapture`.
-- Still to do on Linux: a real Linux build plus the ignored real-install test against a Linux 1.x install, since the SQLite path was refactored and only unit-tested from Windows. macOS isn't a release target for either app, so there's no direct-read path for it.
+  - On Linux, `legacy_store_reads_real_install` against a real 1.x install (`tauri_localhost_0.localstorage`) imported both servers, the active server id and the theme, and ignored the `http_localhost_1420` dev-server file. That covers the refactored SQLite path. The full import button in the Linux app wasn't clicked through.
+- macOS isn't a release target for either app, so there's no direct-read path for it.
+
+## v1.15.0
+
+### 2026-09-24 - 1.x update banner stopped working once native releases existed
+
+- Symptom: installed 1.14.x clients stopped showing any update banner after `native-v2.0.1` was published.
+- Cause: 1.14.x checks GitHub's repo-wide `/releases/latest`, which started returning `native-v2.0.1`. Its version parser reads that tag as `0.0.0.1`, which is never newer than the running version, so it failed silently.
+- Solution:
+  - 1.15.0's `src/lib/updateCheck.ts` reads the release list and keeps only plain `vX.Y.Z` tags. Native does the same for `native-v*` in `native/src/api/github.rs`.
+  - Installed 1.14.x clients can't be changed, so a `v*` release has to stay marked Latest. `native-release.yml` now creates releases with `--latest=false`, and `release.yml` sets `make_latest: 'true'`. When publishing a native draft by hand, leave "Set as the latest release" unticked.
+  - 1.x releases now use `.github/release-notes/v1.md`, which points 1.x users to DVRDesk Native and explains the settings import. 1.14.x clients see the v1.15.0 banner, and its link opens that page.
+- 1.15.0 also ships the "Migrate to DVRDesk Native" copy button, a 10s timeout on subtitle reads from network shares, and HLS player hardening: a load timeout, real request aborts, and a cap on the `recoverMediaError()` loop that crashed WebKitGTK.
 
 ## v1.14.11
 

@@ -207,10 +207,18 @@ jobs:
             # a real, deliberate tradeoff, not an oversight, and the
             # reason this two-step dance exists instead of a single
             # `--draft` create.
+            #
+            # --latest=false: installed 1.x clients (v1.14.x and older)
+            # only check GitHub's repo-wide /releases/latest, and can't
+            # parse a native-v* tag, so a native release marked Latest
+            # silently switches their update banner off. Keep a v* release
+            # as Latest. Leave "Set as the latest release" unticked when
+            # publishing this draft too.
             gh release create "${GITHUB_REF_NAME}" \
               --target "${GITHUB_SHA}" \
               --title "$TITLE" \
-              --notes "Built from ${GITHUB_SHA}."
-            gh release edit "${GITHUB_REF_NAME}" --draft
+              --notes "Built from ${GITHUB_SHA}." \
+              --latest=false
+            gh release edit "${GITHUB_REF_NAME}" --draft --latest=false
           fi
           gh release upload "${GITHUB_REF_NAME}" staging/* --clobber

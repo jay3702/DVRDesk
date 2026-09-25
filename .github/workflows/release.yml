@@ -167,6 +167,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Installed 1.x clients (v1.14.x and older) find updates only via
+          # /releases/latest, so a v* release must stay Latest (native
+          # releases are created with --latest=false for the same reason).
+          make_latest: 'true'
+          body_path: .github/release-notes/v1.md
           files: |
             release-artifacts/**/*.msi
             release-artifacts/**/*-setup.exe
