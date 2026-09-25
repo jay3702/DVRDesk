@@ -150,6 +150,12 @@ jobs:
       - build-linux
     runs-on: windows-latest
     steps:
+      # Only for the release notes (body_path below); the bundles come
+      # from the build jobs' artifacts.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/release-notes
+
       - name: Download release bundles
         uses: actions/download-artifact@v4
         with:
