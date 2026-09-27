@@ -75,6 +75,9 @@ pub struct App {
     // Diagnostics — gated on settings.diagnostics_enabled, matching the
     // old app's Shift+S stats overlay / Copy Report button.
     show_stats: bool,
+    /// The caption style last pushed to mpv, so it's only re-sent when the
+    /// user changes it in Settings.
+    applied_caption_style: Option<crate::state::settings::CaptionStyle>,
 
     /// Set when navigating to a recording from a past guide slot whose
     /// series has an active pass — shown as a small dismissible banner
@@ -113,7 +116,12 @@ impl App {
         let settings_ui = ui::settings::SettingsState::new(&settings);
 
         let player = match cc.get_proc_address {
-            Some(get_proc_address) => Player::new(get_proc_address),
+            Some(get_proc_address) => {
+                let mpv_log = settings
+                    .diagnostics_enabled
+                    .then(|| settings.cache_path().join("mpv.log"));
+                Player::new(get_proc_address, mpv_log.as_deref())
+            }
             None => Err(
                 "cc.get_proc_address is None — eframe is not using the Glow renderer".to_string(),
             ),
@@ -178,6 +186,7 @@ impl App {
             player_controls_active_since: Instant::now(),
 
             show_stats: false,
+            applied_caption_style: None,
 
             pending_pass_notice: None,
             update_info: None,
@@ -458,6 +467,35 @@ impl App {
     /// final position too — otherwise the last few seconds between the last
     /// periodic save and clicking Close wouldn't be reflected if the same
     /// recording is reopened later in this session.
+    /// Diagnostics: saves mpv's decoded frame to `{cache}/frames/`. Taken
+    /// alongside an OS screenshot of the same moment, a clean frame here
+    /// with artifacts on screen means the corruption is in our GL rendering,
+    /// not in the stream or the decoder.
+    fn save_player_frame(&self) {
+        let (Some(now_playing), Ok(player)) = (&self.now_playing, &self.player) else {
+            return;
+        };
+        let dir = self.settings.cache_path().join("frames");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            crate::logline!("save frame: couldn't create {}: {e}", dir.display());
+            return;
+        }
+        let path = dir.join(format!(
+            "frame-{}.png",
+            chrono::Local::now().format("%Y%m%d-%H%M%S%.3f")
+        ));
+        let ok = player.save_video_frame(&path);
+        crate::logline!(
+            "save frame: {} ({}) at {:.2}s, hwdec={} -> {} [{}]",
+            now_playing.title,
+            now_playing.manifest_url.as_deref().unwrap_or("n/a"),
+            player.position_secs().unwrap_or(0.0),
+            player.hwdec_current().unwrap_or_else(|| "n/a".to_string()),
+            path.display(),
+            if ok { "ok" } else { "failed" }
+        );
+    }
+
     fn stop_playback(&mut self, ctx: &egui::Context) {
         if let (Some(now_playing), Ok(player)) = (&self.now_playing, &self.player) {
             if now_playing.recording_kind.is_some() {
@@ -486,6 +524,12 @@ impl App {
             player.stop();
         }
         self.now_playing = None;
+        // The only Fullscreen/Exit Fullscreen control lives in the player
+        // overlay — closing playback while fullscreen used to strand the
+        // whole app fullscreen with no way back out.
+        if ctx.input(|i| i.viewport().fullscreen).unwrap_or(false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
     }
 
     fn drain_messages(&mut self, ctx: &egui::Context) {
@@ -1650,6 +1694,12 @@ impl eframe::App for App {
         // settings screen just change this" signal for two fields that live
         // entirely outside egui's own widget state.
         ctx.set_theme(self.settings.theme);
+        if let Ok(player) = &self.player {
+            if self.applied_caption_style != Some(self.settings.caption_style) {
+                player.apply_caption_style(&self.settings.caption_style);
+                self.applied_caption_style = Some(self.settings.caption_style);
+            }
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
             if self.settings.window_always_on_top {
                 egui::WindowLevel::AlwaysOnTop
@@ -2111,6 +2161,7 @@ impl eframe::App for App {
         let mut new_caption_mode = None;
         let mut new_skip_ads = None;
         let mut new_show_stats = None;
+        let mut save_frame = false;
         if let Some(now_playing) = &self.now_playing {
             if let Ok(player) = &self.player {
                 let showing_toast = self
@@ -2134,7 +2185,11 @@ impl eframe::App for App {
                 new_caption_mode = action.new_caption_mode;
                 new_skip_ads = action.new_skip_ads;
                 new_show_stats = action.new_show_stats;
+                save_frame = action.save_frame;
             }
+        }
+        if save_frame {
+            self.save_player_frame();
         }
         if let Some(show_stats) = new_show_stats {
             self.show_stats = show_stats;

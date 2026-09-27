@@ -29,6 +29,12 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 [target.'cfg(windows)'.dependencies]
 rusty-leveldb = "4.0.1"
 
+# Embeds the .exe's own icon (Explorer, taskbar pinning, Alt-Tab) — see
+# build.rs. Build scripts compile for the host, and the Windows release job
+# builds on Windows, so this is never fetched for Linux builds.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [profile.dev]
 opt-level = 1
 

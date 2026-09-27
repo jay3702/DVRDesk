@@ -4,7 +4,8 @@ pub mod keybindings;
 pub mod mpv_sys;
 pub mod render;
 
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::path::Path;
 use std::sync::Arc;
 
 use mpv_sys::{MpvApi, MpvHandle, MpvRenderContext};
@@ -28,7 +29,13 @@ unsafe impl Send for Player {}
 unsafe impl Sync for Player {}
 
 impl Player {
-    pub fn new(get_proc_address: &dyn Fn(&CStr) -> *const c_void) -> Result<Self, String> {
+    /// `log_file`: when set (diagnostics enabled), mpv writes its own verbose
+    /// log there — decoder errors, the hwdec it actually picked, and frame
+    /// timing, none of which surface anywhere else in the app.
+    pub fn new(
+        get_proc_address: &dyn Fn(&CStr) -> *const c_void,
+        log_file: Option<&Path>,
+    ) -> Result<Self, String> {
         let api = mpv_sys::library().map_err(|e| e.to_string())?;
         unsafe {
             let handle = (api.create)();
@@ -40,6 +47,9 @@ impl Player {
             set_option(api, handle, "hwdec", "auto-safe");
             set_option(api, handle, "keep-open", "yes");
             set_option(api, handle, "osc", "no");
+            if let Some(path) = log_file {
+                set_option(api, handle, "log-file", &path.to_string_lossy());
+            }
 
             let rc = (api.initialize)(handle);
             if rc < 0 {
@@ -138,6 +148,35 @@ impl Player {
         unsafe { get_double(self.api, self.handle, "avsync") }
     }
 
+    /// Frames the decoder itself dropped (distinct from `frame-drop-count`,
+    /// which counts frames dropped at display time).
+    pub fn decoder_dropped_frames(&self) -> Option<i64> {
+        unsafe { get_int64(self.api, self.handle, "decoder-frame-drop-count") }
+    }
+
+    /// The hardware decoder mpv actually chose for the current file ("vaapi",
+    /// "nvdec", …), or "no" for software decoding — `hwdec=auto-safe` alone
+    /// doesn't say which one ends up in use.
+    pub fn hwdec_current(&self) -> Option<String> {
+        unsafe { get_string(self.api, self.handle, "hwdec-current") }
+    }
+
+    /// Writes the current *decoded* video frame (mpv's own screenshot, taken
+    /// before our GL compositing) to `path`. Comparing it with what's on
+    /// screen tells decode-side corruption apart from render-side corruption.
+    pub fn save_video_frame(&self, path: &Path) -> bool {
+        unsafe {
+            let cmd = CString::new("screenshot-to-file").unwrap();
+            let file = match CString::new(path.to_string_lossy().as_bytes()) {
+                Ok(f) => f,
+                Err(_) => return false,
+            };
+            let flags = CString::new("video").unwrap();
+            let argv = [cmd.as_ptr(), file.as_ptr(), flags.as_ptr(), std::ptr::null()];
+            (self.api.command)(self.handle, argv.as_ptr()) >= 0
+        }
+    }
+
     /// Seconds of demuxed data cached ahead of the current position — the
     /// mpv-native equivalent of hls.js's buffer-ahead stat.
     pub fn buffer_ahead_secs(&self) -> Option<f64> {
@@ -158,6 +197,23 @@ impl Player {
     /// intended usage pattern rather than a one-shot post-load check.
     pub fn caption_tracks(&self) -> Vec<captions::CaptionTrack> {
         captions::track_list(self.api, self.handle)
+    }
+
+    /// Applies the user's caption appearance. mpv 0.37's defaults are a
+    /// 55-unit font, a 3-unit outline and no shadow; a background box is
+    /// drawn by `sub-back-color` once the outline is turned off.
+    pub fn apply_caption_style(&self, style: &crate::state::settings::CaptionStyle) {
+        let font_size = (55.0 * style.size_pct as f64 / 100.0).round().max(1.0);
+        let [r, g, b] = style.color;
+        let alpha = (style.background_opacity.min(100) as u32 * 255 / 100) as u8;
+        let boxed = alpha > 0;
+        unsafe {
+            set_property_runtime(self.api, self.handle, "sub-font-size", &font_size.to_string());
+            set_property_runtime(self.api, self.handle, "sub-color", &format!("#{r:02X}{g:02X}{b:02X}"));
+            set_property_runtime(self.api, self.handle, "sub-back-color", &format!("#{alpha:02X}000000"));
+            set_property_runtime(self.api, self.handle, "sub-border-size", if boxed { "0" } else { "3" });
+            set_property_runtime(self.api, self.handle, "sub-shadow-offset", "0");
+        }
     }
 
     /// Selects a subtitle/caption track by mpv's track id ("sid"). mpv does
@@ -281,6 +337,23 @@ unsafe fn get_int64(api: &MpvApi, handle: MpvHandle, name: &str) -> Option<i64> 
     } else {
         None
     }
+}
+
+unsafe fn get_string(api: &MpvApi, handle: MpvHandle, name: &str) -> Option<String> {
+    let name = CString::new(name).unwrap();
+    let mut value: *mut c_char = std::ptr::null_mut();
+    let rc = (api.get_property)(
+        handle,
+        name.as_ptr(),
+        mpv_sys::MPV_FORMAT_STRING,
+        &mut value as *mut *mut c_char as *mut c_void,
+    );
+    if rc < 0 || value.is_null() {
+        return None;
+    }
+    let s = CStr::from_ptr(value).to_string_lossy().into_owned();
+    (api.free)(value as *mut c_void);
+    Some(s)
 }
 
 unsafe fn get_flag(api: &MpvApi, handle: MpvHandle, name: &str) -> Option<bool> {

@@ -1,3 +1,9 @@
+// Release builds are GUI apps on Windows — without this, launching the .exe
+// also opens a console window that stays for the app's lifetime. Debug
+// builds keep the console for stderr output; everything logged also goes to
+// `dvrdesk.log` either way.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod api;
 mod app;
 mod async_bridge;
@@ -43,6 +49,11 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 600.0])
             .with_title("DVRDesk")
+            // Wayland compositors ignore the window icon below and look up
+            // the dock/taskbar icon from the `.desktop` file whose name
+            // matches the app id (also sets the X11 WM_CLASS) — see
+            // `packaging/linux/dvrdesk-native.desktop`.
+            .with_app_id("dvrdesk-native")
             .with_icon(load_icon()),
         ..Default::default()
     };

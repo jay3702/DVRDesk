@@ -32,6 +32,9 @@ pub struct PlayerOverlayAction {
     pub new_skip_ads: Option<bool>,
     /// `Some` the frame the user toggles the stats-for-nerds panel.
     pub new_show_stats: Option<bool>,
+    /// The user clicked Save Frame — caller picks the output path (it owns
+    /// the configured cache directory) and calls `Player::save_video_frame`.
+    pub save_frame: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -53,6 +56,7 @@ pub fn show(
     let mut new_caption_mode = None;
     let mut new_skip_ads = None;
     let mut new_show_stats = None;
+    let mut save_frame = false;
     let screen_rect = ctx.screen_rect();
     let ad_blocks = commercial_skip::ad_blocks(&now_playing.commercials);
 
@@ -212,6 +216,9 @@ pub fn show(
                                 if ui.button("Copy Report").clicked() {
                                     ctx.copy_text(build_report(player, now_playing));
                                 }
+                                if ui.button("Save Frame").clicked() {
+                                    save_frame = true;
+                                }
                             }
 
                             // Plain text, not an icon glyph — this
@@ -347,6 +354,19 @@ pub fn show(
                         );
                         stat_row(
                             ui,
+                            "Decoder drops",
+                            &player
+                                .decoder_dropped_frames()
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "n/a".to_string()),
+                        );
+                        stat_row(
+                            ui,
+                            "HW decoder",
+                            &player.hwdec_current().unwrap_or_else(|| "n/a".to_string()),
+                        );
+                        stat_row(
+                            ui,
                             "A/V sync",
                             &player
                                 .avsync_secs()
@@ -401,6 +421,7 @@ pub fn show(
         new_caption_mode,
         new_skip_ads,
         new_show_stats,
+        save_frame,
     }
 }
 
@@ -450,6 +471,8 @@ fn build_report(player: &Player, now_playing: &NowPlaying) -> String {
          Playback state: {}\n\
          Position: {:.2}s / {:.2}s\n\
          Dropped frames: {}\n\
+         Decoder drops: {}\n\
+         HW decoder: {}\n\
          A/V sync: {}\n\
          Buffer ahead: {}\n\
          Video bitrate: {}\n\
@@ -465,6 +488,11 @@ fn build_report(player: &Player, now_playing: &NowPlaying) -> String {
             .dropped_frames()
             .map(|v| v.to_string())
             .unwrap_or_else(|| "n/a".to_string()),
+        player
+            .decoder_dropped_frames()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "n/a".to_string()),
+        player.hwdec_current().unwrap_or_else(|| "n/a".to_string()),
         player
             .avsync_secs()
             .map(|v| format!("{v:.3}s"))

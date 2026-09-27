@@ -208,6 +208,13 @@ pub struct LiveState {
     /// see anything current. Reset to `false` whenever the guide reloads, or
     /// by the toolbar's "Now" button to re-center on demand.
     pub scrolled_to_now: bool,
+    /// The timeline `origin` and horizontal scroll offset from the last
+    /// rendered frame. `origin` is the earliest loaded program start, so it
+    /// moves earlier as the guide, then guide history, finish loading — and
+    /// the same pixel offset would then point at an earlier time, visibly
+    /// jumping the grid away from "now" just after first display. Tracking
+    /// both lets the next frame shift the offset by the same amount.
+    pub timeline_anchor: Option<(i64, f32)>,
 }
 
 impl Default for LiveState {
@@ -233,6 +240,7 @@ impl Default for LiveState {
             dialog: None,
             play_choice: None,
             scrolled_to_now: false,
+            timeline_anchor: None,
         }
     }
 }
@@ -838,6 +846,26 @@ pub fn show(
     // there, which was clipping the start of its title off-screen.
     let hour_align = |t: i64| t - t.rem_euclid(3600);
 
+    // Keep the viewport on the same *time* when `origin` moves (see
+    // `timeline_anchor`) — unless something else already asked for a
+    // specific position this frame.
+    if let Some((prev_origin, prev_offset_x)) = state.timeline_anchor {
+        if prev_origin != origin && state.pending_scroll_x.is_none() && state.scrolled_to_now {
+            // Still sitting where "Now" put it (the offset may have been
+            // clamped while little was loaded) — just redo "Now" against
+            // the new origin. Otherwise the user has scrolled: keep their
+            // time in view.
+            let prev_now_x =
+                ((hour_align(now) - prev_origin) as f32 / 60.0 * PIXELS_PER_MIN).max(0.0);
+            if (prev_offset_x - prev_now_x).abs() < 1.0 {
+                state.scrolled_to_now = false;
+            } else {
+                let shift = (prev_origin - origin) as f32 / 60.0 * PIXELS_PER_MIN;
+                state.pending_scroll_x = Some((prev_offset_x + shift).max(0.0));
+            }
+        }
+    }
+
     // Search "positions the guide at a matching channel or program" rather
     // than filtering rows out (unlike Clicker's own search, which hides
     // non-matching rows) — a channel-number/name match wins outright over a
@@ -1440,6 +1468,7 @@ pub fn show(
             .inner
         })
         .inner;
+    state.timeline_anchor = timeline_offset_x.map(|x| (origin, x));
 
     // Now that the timeline body has actually been shown (and reported its
     // real, post-interaction horizontal offset), paint the sticky ruler's

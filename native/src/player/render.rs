@@ -146,6 +146,17 @@ pub unsafe fn render_into_current_fbo(
     let fbo_binding = gl.get_parameter_i32(glow::FRAMEBUFFER_BINDING);
     let state = GlStateGuard::capture(gl);
 
+    // egui_glow invokes paint callbacks with its own premultiplied-alpha
+    // blending and clip-rect scissor still enabled. mpv only enables blending
+    // for the passes that want it (and disables it afterwards), so the first
+    // pass of every frame inherited egui's blend — writing `src + dst*(1-a)`
+    // into mpv's freshly (re)allocated rgba16f intermediates. Where that
+    // uninitialized memory held NaN, `0*NaN` kept it NaN on every frame:
+    // black blotches that never cleared, on roughly 1 tune in 5, while mpv's
+    // own decoded-frame screenshot was clean. Hand mpv default state instead.
+    gl.disable(glow::BLEND);
+    gl.disable(glow::SCISSOR_TEST);
+
     let mut fbo = mpv_opengl_fbo {
         fbo: fbo_binding,
         w: width,

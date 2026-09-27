@@ -123,6 +123,31 @@ impl Default for SkipIntervalsConfig {
     }
 }
 
+/// Closed-caption appearance — applied through mpv's `sub-*` text-style
+/// options, which (confirmed against libmpv 0.37 with real CEA-608 captions)
+/// are what style lavc-converted caption tracks; `sub-scale` and ASS style
+/// overrides had no visible effect on them.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CaptionStyle {
+    /// Percent of mpv's default caption size.
+    pub size_pct: u32,
+    pub color: [u8; 3],
+    /// Opacity of a box behind the text, 0–100. Zero keeps mpv's default
+    /// outlined text with no box.
+    pub background_opacity: u8,
+}
+
+impl Default for CaptionStyle {
+    fn default() -> Self {
+        Self {
+            size_pct: 100,
+            color: [255, 255, 255],
+            background_opacity: 0,
+        }
+    }
+}
+
 fn default_theme() -> egui::ThemePreference {
     egui::ThemePreference::System
 }
@@ -141,6 +166,8 @@ pub struct AppSettings {
     pub keybindings: KeybindingsConfig,
     #[serde(default)]
     pub skip_intervals: SkipIntervalsConfig,
+    #[serde(default)]
+    pub caption_style: CaptionStyle,
     #[serde(default = "default_theme")]
     pub theme: egui::ThemePreference,
     #[serde(default)]
@@ -186,6 +213,7 @@ impl Default for AppSettings {
             show_hidden_live_channels: false,
             keybindings: KeybindingsConfig::default(),
             skip_intervals: SkipIntervalsConfig::default(),
+            caption_style: CaptionStyle::default(),
             theme: default_theme(),
             window_always_on_top: false,
             sidebar_collapsed: false,

@@ -543,6 +543,33 @@ pub fn show(
         ui.add_space(8.0);
         ui.separator();
 
+        ui.heading("Captions");
+        let style = &mut settings.caption_style;
+        let before = *style;
+        egui::Grid::new("caption_style_grid")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Size");
+                ui.add(egui::Slider::new(&mut style.size_pct, 40..=200).suffix("%"));
+                ui.end_row();
+                ui.label("Text color");
+                egui::color_picker::color_edit_button_srgb(ui, &mut style.color);
+                ui.end_row();
+                ui.label("Background");
+                ui.add(egui::Slider::new(&mut style.background_opacity, 0..=100).suffix("%"))
+                    .on_hover_text("Opacity of a box behind the text. 0% shows outlined text with no box.");
+                ui.end_row();
+            });
+        if ui.button("Reset Caption Style").clicked() {
+            *style = Default::default();
+        }
+        if *style != before {
+            action.settings_changed = true;
+        }
+        ui.add_space(8.0);
+        ui.separator();
+
         ui.heading("Live TV");
         if ui
             .checkbox(&mut settings.show_hidden_live_channels, "Show hidden channels")

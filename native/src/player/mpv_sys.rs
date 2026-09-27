@@ -118,6 +118,8 @@ pub struct MpvApi {
     /// Must be called on any `mpv_node` populated via `get_property` with
     /// `MPV_FORMAT_NODE` — mpv allocates the node tree, this frees it.
     pub free_node_contents: unsafe extern "C" fn(*mut mpv_node),
+    /// Frees strings mpv allocates for `get_property` with `MPV_FORMAT_STRING`.
+    pub free: unsafe extern "C" fn(*mut c_void),
     pub request_event: unsafe extern "C" fn(MpvHandle, c_int, c_int) -> c_int,
     pub wait_event: unsafe extern "C" fn(MpvHandle, c_double) -> *mut mpv_event,
     pub terminate_destroy: unsafe extern "C" fn(MpvHandle),
@@ -190,6 +192,7 @@ unsafe fn load() -> Result<MpvApi, String> {
         get_property: sym!("mpv_get_property"),
         set_property_string: sym!("mpv_set_property_string"),
         free_node_contents: sym!("mpv_free_node_contents"),
+        free: sym!("mpv_free"),
         request_event: sym!("mpv_request_event"),
         wait_event: sym!("mpv_wait_event"),
         terminate_destroy: sym!("mpv_terminate_destroy"),
