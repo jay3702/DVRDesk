@@ -12,6 +12,30 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native v2.1.1
+
+### 2026-09-27 - Native: black blotches in live video that never cleared
+
+- Symptom: on some HaleLeahi (HDHomeRun PRIME) channels, about 1 tune in 5 showed black, dash-shaped holes in part of the picture that stayed for the whole session. Reproduced on channel 5.
+- Ruled out:
+  - The stream. Captures of `stream.mpg` decode cleanly after the normal mid-stream-join errors, and channel 5 has an IDR every 120 frames, so decoder damage can't last more than 2s.
+  - Hardware decoding. VAAPI and software decodes of eight captures matched frame for frame. NVDEC isn't installed (`libnvcuvid` missing).
+  - Captions (`sid="no"` in the mpv log).
+- Evidence: added diagnostics (below). At the moment of a glitch, mpv's own decoded-frame screenshot was clean while the screen had the holes, so the corruption was in rendering.
+- Cause: egui_glow calls paint callbacks with its premultiplied-alpha blending and clip-rect scissor enabled. mpv only enables blending for passes that want it and disables it afterwards, so the first pass of each frame blended into mpv's intermediates, which are reallocated on every tune as `rgba16f`. Where that uninitialized memory held NaN, `src + dst*(1-a)` stayed NaN (`0*NaN`) on every frame and rendered black. That mpv doesn't reset blend before a pass comes from memory of its source, not a check of it.
+- Solution: `render_into_current_fbo` disables `BLEND` and `SCISSOR_TEST` before calling mpv. `GlStateGuard` already restores them afterwards.
+- Diagnostics added (only with diagnostics enabled): mpv's log to `{cache}/mpv.log`, active hwdec and decoder drops in Stats/Copy Report, and a Save Frame button that writes mpv's decoded frame to `{cache}/frames/`.
+- Validation: the user replayed channel 5 repeatedly after the fix with no recurrence.
+
+### 2026-09-27 - Native: forum feedback (captions, fullscreen, icons, console) and guide jump
+
+- Caption styling: new Settings → Captions (size, text color, background box opacity). Checked by rendering real CEA-608 captions through libmpv's software renderer: captions converted by lavc are styled by `sub-font-size`/`sub-color`/`sub-back-color`, while `sub-scale` and `sub-ass-style-overrides` had no visible effect. The box needs `sub-border-size=0`. mpv 0.37 defaults are font 55, border 3, shadow 0.
+- Fullscreen: the only toggle lives in the player overlay, so closing playback while fullscreen stranded the app. `stop_playback` now leaves fullscreen.
+- Linux dock icon: Wayland ignores the window icon and finds it through the `.desktop` file matching the app id. Set `with_app_id("dvrdesk-native")` and added `StartupWMClass` to the desktop file.
+- Windows: `build.rs` embeds `src-tauri/icons/icon.ico` via `winresource` (a Windows-only build dependency), and release builds use `windows_subsystem = "windows"` so no console window opens. Not yet built on Windows. The first `native-v2.1.1` tag run is its first test.
+- Guide grid jump: the timeline is measured from `origin`, the earliest loaded program start, which moves earlier as the guide and then guide history finish loading. The first frame scrolled to "now", then the same pixel offset pointed at an earlier time. Now the offset is shifted by the origin change, and if the user hasn't scrolled, "Now" is re-applied instead.
+- Validation: builds and tests pass on Linux. The caption settings were checked with libmpv renders. The other changes haven't been checked in the running app.
+
 ## Native v2.1.0
 
 ### 2026-09-24 - Native: Settings text fields clipped their contents
