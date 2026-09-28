@@ -12,6 +12,31 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native v2.1.2
+
+### 2026-09-28 - Native: mpv on Windows downloads from inside the app
+
+- Symptom: a forum user couldn't get playback working on Windows. `winget install mpv-player.mpv-CI` failed for them (`0x8a15000f`, a broken winget source), but it would not have helped anyway.
+- Cause: the documented install never worked. The winget package (real ID `mpv-player.mpv-CI.MSVC`) is the official mpv zip, which holds `mpv.exe`, `mpv.com`, two `.bat` files and `vulkan-1.dll`, with no `libmpv-2.dll`. winget also only links `mpv.exe` for portable packages. A missing libmpv also made Play silently do nothing, since `start_now_playing` only loaded the URL when the player existed and the overlay only drew when it did.
+- Decision: download rather than bundle. The Windows libmpv builds are GPLv3 with many libraries compiled in, so bundling means publishing corresponding source for all of it with every release. DVRDesk is MIT, so bundling would be allowed but is a recurring chore. A user-triggered download from the publisher avoids redistribution entirely.
+- Solution (`native/src/mpv_install.rs`, `native/src/ui/mpv_needed.rs`):
+  - A dialog opens at startup and on Play when libmpv can't be loaded. On Linux it lists the package to install.
+  - On Windows it finds `mpv-dev-x86_64-<date>-git-<id>.7z` (not the AVX2 `-v3` build) in shinchiro/mpv-winbuild-cmake's latest release and downloads it with progress. It checks the file against the `sha256` digest GitHub's API reports, extracts `libmpv-2.dll` into the local (non-roaming) app data folder with `sevenz-rust2` (the archive uses a BCJ2 filter), and offers a restart. `mpv_sys` tries that path first.
+  - shinchiro keeps only about 30 releases (about four months), so the version isn't pinned; the published digest is the integrity check.
+  - `libmpv-2.dll` hard-imports `vulkan-1.dll` (the delay-import table is empty), which comes with GPU drivers. If it's missing from System32 the dialog says to update the graphics driver.
+- Validation: on a Windows PC without mpv, the dialog appeared, downloaded and installed libmpv, restarted DVRDesk, and content played. That build was cross-compiled from Linux with cargo-zigbuild (MinGW), not the release's MSVC build.
+
+### 2026-09-28 - Native: one-click Guide History install, auto-discovery
+
+- Request: install the history service from the client without any user input. The client already knows the DVR address.
+- Problems with the old deployer: it ran `cargo build` against a source path fixed at compile time (`CARGO_MANIFEST_DIR`), which for a release points at the CI runner, so deploys failed for everyone but a developer. It was also Linux-only.
+- Solution:
+  - Release packages bundle the service (`.deb`: `/usr/lib/dvrdesk-native/`, Windows zip: next to the exe). `bundled_service_binary` finds it there, or in the source tree's build output in debug builds.
+  - The service accepts every setting as a `--flag` (flags win over env vars), because Task Scheduler can't set a task's environment. `GHS_CHANNELS_DVR_URL` replaces the ambiguous `GHS_SERVER_URL`, which still works.
+  - Settings > Programming History > Install on This PC builds the target from the active server. Linux uses the existing systemd user unit and linger. Windows starts the service at boot (the user's choice), which means SYSTEM and one UAC prompt: an elevated PowerShell run, passed as `-EncodedCommand` so there's no quoting or execution-policy trouble and no temp file. It copies the exe under Program Files (admin-only, since SYSTEM runs it), registers the task (no time limit, restarts on failure), and adds an inbound firewall rule for private and domain networks, since SYSTEM processes never get the firewall prompt. Results come back through a token-tagged file in ProgramData, because output from a `-Verb RunAs` process can't be captured.
+  - Auto-discovery: with Programming History blank, the client checks `http://<DVR host>:8790/health` once per server per session. It accepts only a reply that looks like the service (`programs_cached`), within 3 seconds, and saves it. This fits the recommended setup: install on the Channels DVR PC, and every client finds it.
+- Validation: builds and tests pass on Linux. The app and service type-check for Windows (cross-check with zig cc). The generated install, uninstall and launcher scripts parse with no errors in PowerShell 7.6, the encoded payload round-trips, and the task arguments evaluate as expected. The service ran against a real DVR with flags. The `.deb` contains the service. The Windows install itself (UAC, the task, the firewall rule, starting at boot) and auto-discovery haven't been run on real machines yet.
+
 ## Native v2.1.1
 
 ### 2026-09-27 - Native: black blotches in live video that never cleared
