@@ -1,16 +1,23 @@
 //! Create/test/deploy/test workflow for `guide-history-service` instances,
-//! driven from Settings' "Deploy & Manage Instances" section. Linux only
-//! (local + remote); Windows service management and inconsistent SSH-server
-//! availability on Windows are each their own chunk of work, deliberately
-//! deferred rather than guessed at.
+//! driven from Settings — the one-click "Install on This PC" in
+//! Programming History, and the "Deploy & Manage Instances" section.
+//! Local installs work on Linux (systemd user unit) and Windows (a boot-time
+//! SYSTEM scheduled task); remote installs are Linux over SSH only, since
+//! SSH servers on Windows are too rarely set up to build on.
 //!
 //! Design choices, stated once here rather than re-justified at each call
 //! site:
-//! - **Same-architecture reuse, not cross-compilation.** The binary is
-//!   built fresh locally (`cargo build --release` against the sibling
-//!   `guide-history-service/` source tree) and transferred as-is — a
-//!   remote host with a different CPU architecture is detected and refused
-//!   with a clear message, never silently attempted.
+//! - **The bundled binary, not a build.** Release packages ship
+//!   `guide-history-service` beside the app (see `bundled_service_binary`),
+//!   so installing needs no source checkout or Rust toolchain. A remote host
+//!   gets the same binary, so one with a different CPU architecture is
+//!   detected and refused with a clear message, never silently attempted.
+//! - **Windows runs it as SYSTEM at boot**, so it records while nobody is
+//!   signed in. That needs one UAC prompt: the elevated step copies the exe
+//!   under Program Files (admin-only, since SYSTEM runs it), registers the
+//!   task, and opens the port to private networks in Windows Firewall —
+//!   other PCs can't reach it otherwise, and a SYSTEM process never gets
+//!   the "allow access" prompt.
 //! - **SSH via the system's own `ssh`/`scp`** (`tokio::process::Command`),
 //!   not an embedded SSH client — reuses whatever the user already has
 //!   configured (`~/.ssh/config`, known_hosts, agent) and this app never
@@ -55,7 +62,6 @@ pub enum DeployStatus {
         remote_arch: String,
     },
     ConnectionFailed(String),
-    Building,
     Transferring,
     Installing,
     HealthChecking,
@@ -190,8 +196,14 @@ async fn run_deploy(
         }
     }
 
-    inner.set(id, DeployStatus::Building);
-    build_release().await?;
+    #[cfg(windows)]
+    if target.kind == DeployKind::Local {
+        inner.set(id, DeployStatus::Installing);
+        windows_local::install(target).await?;
+        inner.set(id, DeployStatus::HealthChecking);
+        let programs_cached = health_check(&http_host(target), target.listen_port).await?;
+        return Ok((programs_cached, None));
+    }
 
     inner.set(id, DeployStatus::Transferring);
     let (exec_path, data_path) = match target.kind {
@@ -222,6 +234,9 @@ async fn run_deploy(
 
 async fn run_remove(target: &DeployTarget) -> Result<(), String> {
     match target.kind {
+        #[cfg(windows)]
+        DeployKind::Local => windows_local::uninstall().await,
+        #[cfg(not(windows))]
         DeployKind::Local => {
             // Best-effort — an already-stopped/never-started unit
             // shouldn't block cleaning up the rest.
@@ -261,7 +276,9 @@ fn remote_install_dir(target: &DeployTarget) -> String {
 // --- Connection checks ------------------------------------------------
 
 async fn check_local() -> Result<String, String> {
-    for bin in ["systemctl", "cargo"] {
+    bundled_service_binary()?;
+    #[cfg(unix)]
+    for bin in ["systemctl"] {
         let ok = tokio::process::Command::new("which")
             .arg(bin)
             .output()
@@ -273,12 +290,6 @@ async fn check_local() -> Result<String, String> {
                 "`{bin}` not found on PATH — required for local deploy."
             ));
         }
-    }
-    if !ghs_source_dir().exists() {
-        return Err(format!(
-            "guide-history-service source not found at {} — deploy requires a full checkout of this repo.",
-            ghs_source_dir().display()
-        ));
     }
     Ok(std::env::consts::ARCH.to_string())
 }
@@ -296,49 +307,43 @@ async fn check_remote(target: &DeployTarget) -> Result<String, String> {
     Ok(remote_arch)
 }
 
-// --- Build --------------------------------------------------------------
+// --- Bundled binary -----------------------------------------------------
 
-fn ghs_source_dir() -> PathBuf {
-    PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../guide-history-service"
-    ))
-}
+#[cfg(windows)]
+const SERVICE_EXE: &str = "guide-history-service.exe";
+#[cfg(not(windows))]
+const SERVICE_EXE: &str = "guide-history-service";
 
-fn ghs_release_binary_path() -> PathBuf {
-    ghs_source_dir().join("target/release/guide-history-service")
-}
-
-async fn build_release() -> Result<(), String> {
-    let dir = ghs_source_dir();
-    if !dir.exists() {
-        return Err(format!(
-            "guide-history-service source not found at {} — deploy requires a full checkout of this repo.",
-            dir.display()
-        ));
+/// The `guide-history-service` binary shipped with this app: beside the
+/// executable (the Windows zip, or an unpacked build), under
+/// `/usr/lib/dvrdesk-native/` (the .deb), or — in a debug build only — the
+/// sibling source tree's own build output.
+fn bundled_service_binary() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+        candidates.push(dir.join(SERVICE_EXE));
     }
-    let output = tokio::process::Command::new("cargo")
-        .args(["build", "--release"])
-        .current_dir(&dir)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run cargo: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: Vec<&str> = stderr.lines().rev().take(15).collect();
-        let tail: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-        return Err(format!("cargo build --release failed:\n{tail}"));
+    #[cfg(target_os = "linux")]
+    candidates.push(PathBuf::from("/usr/lib/dvrdesk-native").join(SERVICE_EXE));
+    #[cfg(debug_assertions)]
+    {
+        let src = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../guide-history-service/target"));
+        candidates.push(src.join("release").join(SERVICE_EXE));
+        candidates.push(src.join("debug").join(SERVICE_EXE));
     }
-    Ok(())
+    candidates.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
+        format!(
+            "The guide history service isn't included with this copy of DVRDesk (looked in {}). \
+             Reinstall DVRDesk Native from its release download.",
+            candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+        )
+    })
 }
 
 // --- Transfer -------------------------------------------------------------
 
 async fn install_local_binary() -> Result<(String, String), String> {
-    let src = ghs_release_binary_path();
-    if !src.exists() {
-        return Err(format!("Built binary not found at {}", src.display()));
-    }
+    let src = bundled_service_binary()?;
     let install_dir = crate::paths::data_dir()
         .ok_or_else(|| "no data directory available".to_string())?
         .join("guide-history-service");
@@ -370,10 +375,7 @@ async fn install_local_binary() -> Result<(String, String), String> {
 }
 
 async fn install_remote_binary(target: &DeployTarget) -> Result<(String, String), String> {
-    let src = ghs_release_binary_path();
-    if !src.exists() {
-        return Err(format!("Built binary not found at {}", src.display()));
-    }
+    let src = bundled_service_binary()?;
     let install_dir = remote_install_dir(target);
     // Left unquoted (including any leading `~`) deliberately, so the
     // remote shell still expands `~` — this means paths with spaces or
@@ -444,7 +446,7 @@ fn render_unit(target: &DeployTarget, exec_path: &str, data_path: &str) -> Strin
          ExecStart={exec_path}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
-         Environment=GHS_SERVER_URL={url}\n\
+         Environment=GHS_CHANNELS_DVR_URL={url}\n\
          Environment=GHS_POLL_SECS={poll}\n\
          Environment=GHS_RETENTION_SECS={retention}\n\
          Environment=GHS_FETCH_WINDOW_SECS={window}\n\
@@ -676,4 +678,200 @@ async fn scp_upload(target: &DeployTarget, local: &Path, remote_path: &str) -> R
         ));
     }
     Ok(())
+}
+
+// --- Windows local install ------------------------------------------------
+
+/// Everything that needs admin rights happens in one elevated PowerShell run
+/// (one UAC prompt). The script is passed as `-EncodedCommand` (base64
+/// UTF-16LE), which sidesteps both nested command-line quoting and the
+/// script execution policy, and needs no temp file. An elevated process's
+/// output can't be captured through `Start-Process -Verb RunAs`, so the
+/// script reports through a small result file, tagged with a per-run token
+/// so a stale file from an earlier run is never mistaken for this one.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows_local {
+    use crate::state::settings::DeployTarget;
+
+    pub const TASK_NAME: &str = "DVRDesk Guide History";
+
+    /// PowerShell single-quoted string literal.
+    pub fn ps_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    pub fn install_script(target: &DeployTarget, source_exe: &str) -> String {
+        // Built by concatenating single-quoted literals with `$data`, so no
+        // PowerShell escaping is needed; the double quotes are for the
+        // service's own command line (paths may contain spaces).
+        let head = format!(
+            "--channels-dvr-url \"{}\" --listen \"0.0.0.0:{}\" --data \"",
+            target.dvr_server_url.replace('"', ""),
+            target.listen_port,
+        );
+        let tail = format!(
+            "\\guide-history.json\" --poll-secs {} --retention-secs {} --fetch-window-secs {}",
+            target.poll_secs, target.retention_secs, target.fetch_window_secs,
+        );
+        let args = format!("({} + $data + {})", ps_quote(&head), ps_quote(&tail));
+        format!(
+            "$bin = Join-Path $env:ProgramFiles 'DVRDesk\\guide-history-service'\n\
+             $data = Join-Path $env:ProgramData 'DVRDesk\\guide-history-service'\n\
+             New-Item -ItemType Directory -Force -Path $bin, $data | Out-Null\n\
+             {remove_task}\
+             $exe = Join-Path $bin 'guide-history-service.exe'\n\
+             Copy-Item -LiteralPath {src} -Destination $exe -Force\n\
+             $action = New-ScheduledTaskAction -Execute $exe -Argument {args} -WorkingDirectory $data\n\
+             $trigger = New-ScheduledTaskTrigger -AtStartup\n\
+             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n\
+             $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 \
+             -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable\n\
+             Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null\n\
+             New-NetFirewallRule -DisplayName $task -Direction Inbound -Action Allow -Protocol TCP -LocalPort {port} -Profile Private,Domain | Out-Null\n\
+             Start-ScheduledTask -TaskName $task\n",
+            remove_task = REMOVE_TASK,
+            src = ps_quote(source_exe),
+            args = args,
+            port = target.listen_port,
+        )
+    }
+
+    pub fn uninstall_script() -> String {
+        format!(
+            "{REMOVE_TASK}\
+             Remove-Item -LiteralPath (Join-Path $env:ProgramFiles 'DVRDesk\\guide-history-service') -Recurse -Force -ErrorAction SilentlyContinue\n\
+             Remove-Item -LiteralPath (Join-Path $env:ProgramData 'DVRDesk\\guide-history-service') -Recurse -Force -ErrorAction SilentlyContinue\n"
+        )
+    }
+
+    /// Stops and removes any existing task, running copy (which would hold
+    /// the exe and the port) and firewall rule — shared by install (so a
+    /// reinstall/update starts clean) and uninstall.
+    const REMOVE_TASK: &str = "\
+        if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {\n\
+          Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue\n\
+          Unregister-ScheduledTask -TaskName $task -Confirm:$false\n\
+        }\n\
+        Get-Process -Name 'guide-history-service' -ErrorAction SilentlyContinue | Stop-Process -Force\n\
+        Get-NetFirewallRule -DisplayName $task -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n\
+        Start-Sleep -Milliseconds 500\n";
+
+    /// Wraps `body` with the task name, error handling and result reporting.
+    pub fn elevated_script(body: &str, token: &str) -> String {
+        format!(
+            "$ErrorActionPreference = 'Stop'\n\
+             $task = {task}\n\
+             $result = Join-Path $env:ProgramData 'DVRDesk\\ghs-result.txt'\n\
+             New-Item -ItemType Directory -Force -Path (Split-Path $result) | Out-Null\n\
+             try {{\n{body}Set-Content -LiteralPath $result -Value {ok}\n}} catch {{\n\
+             Set-Content -LiteralPath $result -Value ({token_q} + ' ' + ($_ | Out-String))\n\
+             exit 1\n}}\n",
+            task = ps_quote(TASK_NAME),
+            ok = ps_quote(&format!("{token} ok")),
+            token_q = ps_quote(token),
+        )
+    }
+
+    /// Runs `script` via a non-elevated PowerShell that launches an elevated
+    /// one and waits for it. Exit code 1223 = the UAC prompt was declined.
+    pub fn launcher_script(elevated_b64: &str) -> String {
+        format!(
+            "try {{ $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden \
+             -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{elevated_b64}'); \
+             exit $p.ExitCode }} catch {{ exit 1223 }}"
+        )
+    }
+
+    pub fn encode(script: &str) -> String {
+        use base64::Engine as _;
+        let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        base64::engine::general_purpose::STANDARD.encode(utf16)
+    }
+
+    #[cfg(windows)]
+    async fn run_elevated(body: &str) -> Result<(), String> {
+        let token = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let elevated = encode(&elevated_script(body, &token));
+        let launcher = encode(&launcher_script(&elevated));
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = tokio::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &launcher])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run PowerShell: {e}"))?;
+        if output.status.code() == Some(1223) {
+            return Err("Administrator permission is needed to install the service, and it was declined.".into());
+        }
+        let result_path = std::env::var("ProgramData")
+            .map(|d| std::path::PathBuf::from(d).join("DVRDesk").join("ghs-result.txt"))
+            .map_err(|_| "ProgramData isn't set".to_string())?;
+        let result = std::fs::read_to_string(&result_path).unwrap_or_default();
+        match result.trim().strip_prefix(&token) {
+            Some(rest) if rest.trim() == "ok" => Ok(()),
+            Some(rest) => Err(rest.trim().to_string()),
+            None => Err(format!(
+                "The elevated install step didn't report back (exit {:?}). {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )),
+        }
+    }
+
+    #[cfg(windows)]
+    pub async fn install(target: &DeployTarget) -> Result<(), String> {
+        let src = super::bundled_service_binary()?;
+        run_elevated(&install_script(target, &src.to_string_lossy())).await
+    }
+
+    #[cfg(windows)]
+    pub async fn uninstall() -> Result<(), String> {
+        run_elevated(&uninstall_script()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_local::*;
+    use crate::state::settings::DeployTarget;
+
+    #[test]
+    fn ps_quote_doubles_single_quotes() {
+        assert_eq!(ps_quote("C:\\Jo's dir"), "'C:\\Jo''s dir'");
+    }
+
+    #[test]
+    fn encode_is_base64_utf16le() {
+        // "a" → 61 00 → "YQA="
+        assert_eq!(encode("a"), "YQA=");
+    }
+
+    /// Writes the generated scripts to `$GHS_PS_DUMP_DIR` (when set) so they
+    /// can be syntax-checked with a real PowerShell parser.
+    #[test]
+    fn windows_scripts_render() {
+        let target = DeployTarget::new_local("t".into(), "http://192.168.1.50:8089".into());
+        let install = elevated_script(
+            &install_script(&target, "C:\\Users\\Jo O'Neil\\DVRDesk\\guide-history-service.exe"),
+            "abc123",
+        );
+        assert!(install.contains("'C:\\Users\\Jo O''Neil\\DVRDesk\\guide-history-service.exe'"));
+        let uninstall = elevated_script(&uninstall_script(), "abc123");
+        let launcher = launcher_script(&encode(&install));
+        if let Ok(dir) = std::env::var("GHS_PS_DUMP_DIR") {
+            let dir = std::path::Path::new(&dir);
+            std::fs::write(dir.join("install.ps1"), &install).unwrap();
+            std::fs::write(dir.join("uninstall.ps1"), &uninstall).unwrap();
+            std::fs::write(dir.join("launcher.ps1"), &launcher).unwrap();
+        }
+        // The launcher is itself passed encoded on the command line, which
+        // Windows caps at 32,767 characters.
+        assert!(encode(&launcher).len() < 30_000, "launcher too long: {}", encode(&launcher).len());
+    }
 }

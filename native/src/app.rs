@@ -78,6 +78,10 @@ pub struct App {
     /// The caption style last pushed to mpv, so it's only re-sent when the
     /// user changes it in Settings.
     applied_caption_style: Option<crate::state::settings::CaptionStyle>,
+    /// Servers already checked for a history service on their own host,
+    /// so each is probed once per session.
+    history_discovery_tried: std::collections::HashSet<String>,
+    mpv_needed: ui::mpv_needed::MpvNeededState,
 
     /// Set when navigating to a recording from a past guide slot whose
     /// series has an active pass — shown as a small dismissible banner
@@ -126,6 +130,10 @@ impl App {
                 "cc.get_proc_address is None — eframe is not using the Glow renderer".to_string(),
             ),
         };
+        if let Err(e) = &player {
+            crate::logline!("player unavailable: {e}");
+        }
+        let player_failed = player.is_err();
 
         let bridge = AsyncBridge::new();
         let downloads = crate::downloads::Downloads::new(
@@ -187,6 +195,12 @@ impl App {
 
             show_stats: false,
             applied_caption_style: None,
+            history_discovery_tried: std::collections::HashSet::new(),
+            mpv_needed: ui::mpv_needed::MpvNeededState {
+                // Shown straight away when libmpv couldn't be loaded.
+                open: player_failed,
+                ..Default::default()
+            },
 
             pending_pass_notice: None,
             update_info: None,
@@ -310,9 +324,11 @@ impl App {
     /// Shared reset of every per-session playback guard — factored out once
     /// a second caller (library videos) needed the identical bookkeeping.
     fn start_now_playing(&mut self, url: &str, now_playing: NowPlaying) {
-        if let Ok(player) = &self.player {
-            player.load_url(url);
-        }
+        let Ok(player) = &self.player else {
+            self.mpv_needed.open = true;
+            return;
+        };
+        player.load_url(url);
 
         self.now_playing = Some(now_playing);
         self.has_applied_resume = false;
@@ -849,6 +865,19 @@ impl App {
                 Msg::HistoryServiceProbeResult(result) => {
                     self.settings_ui.history_probe_completed(result);
                 }
+                Msg::HistoryServiceDiscovered { server_id, url } => {
+                    if self.settings.history_service_url.is_none()
+                        && self.settings.active_server_id.as_deref() == Some(server_id.as_str())
+                    {
+                        crate::logline!("guide history: found a service at {url}, using it");
+                        self.settings.history_service_url = Some(url.clone());
+                        if let Err(e) = self.settings.save() {
+                            crate::logline!("settings: failed to save: {e}");
+                        }
+                        self.settings_ui.history_url_changed(&url);
+                        self.live.history = ui::Loaded::Idle;
+                    }
+                }
                 Msg::PastRecordingLoaded { result, has_pass } => match result {
                     Ok(rec) => {
                         use crate::state::now_playing::RecordingKind;
@@ -900,6 +929,43 @@ impl App {
                 },
             }
         }
+    }
+
+    /// With no Programming History URL set, checks once whether a history
+    /// service is answering on the active Channels DVR server's own host at
+    /// the default port — the recommended setup (installed from Settings on
+    /// the DVR's PC), which then needs no setup on any other client.
+    fn discover_history_service(&mut self, ctx: &egui::Context) {
+        if self.settings.history_service_url.is_some() {
+            return;
+        }
+        let (Some(server_id), Some(server_url)) =
+            (self.settings.active_server_id.clone(), self.active_server_url())
+        else {
+            return;
+        };
+        if !self.history_discovery_tried.insert(server_id.clone()) {
+            return;
+        }
+        let Some(host) = reqwest::Url::parse(&server_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+        else {
+            return;
+        };
+        let host = if host.contains(':') { format!("[{host}]") } else { host };
+        let url = format!("http://{host}:8790");
+        let tx = self.bridge.tx.clone();
+        let ctx = ctx.clone();
+        self.bridge.runtime.spawn(async move {
+            if api::guide_history::is_history_service(&url).await {
+                async_bridge::send_and_repaint(
+                    &tx,
+                    &ctx,
+                    Msg::HistoryServiceDiscovered { server_id, url },
+                );
+            }
+        });
     }
 
     fn active_server_url(&self) -> Option<String> {
@@ -1168,6 +1234,7 @@ impl App {
                 });
             }
         }
+        self.discover_history_service(ctx);
         // Entirely optional — only fetched when the user has pointed
         // Settings at a running `guide-history-service` instance.
         if matches!(self.live.history, ui::Loaded::Idle) {
@@ -2202,6 +2269,26 @@ impl eframe::App for App {
         }
         if close_playback {
             self.stop_playback(ctx);
+        }
+
+        if let Err(load_error) = &self.player {
+            let action = ui::mpv_needed::show(ctx, &mut self.mpv_needed, load_error);
+            #[cfg(windows)]
+            if action.start_download {
+                let state = std::sync::Arc::new(std::sync::Mutex::new(
+                    crate::mpv_install::InstallState::Starting,
+                ));
+                self.mpv_needed.install = Some(state.clone());
+                self.bridge
+                    .runtime
+                    .spawn(crate::mpv_install::install(state, ctx.clone()));
+            }
+            if action.restart {
+                match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
+                    Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                    Err(e) => crate::logline!("restart failed: {e}"),
+                }
+            }
         }
     }
 }

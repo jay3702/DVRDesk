@@ -12,6 +12,7 @@ mod deploy;
 mod downloads;
 mod log;
 mod migration;
+mod mpv_install;
 mod paths;
 mod player;
 mod screen;

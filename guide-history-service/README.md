@@ -16,14 +16,16 @@ without it.
 ## Running it
 
 ```sh
-GHS_SERVER_URL=http://192.168.1.10:8089 cargo run --release
+GHS_CHANNELS_DVR_URL=http://192.168.1.10:8089 cargo run --release
 ```
 
-All configuration is environment variables:
+Each setting can be an environment variable or the matching command-line
+flag (`--channels-dvr-url`, `--poll-secs`, `--retention-secs`,
+`--fetch-window-secs`, `--listen`, `--data`); a flag wins when both are set.
 
 | Variable               | Default              | Meaning                                                              |
 |-------------------------|-----------------------|------------------------------------------------------------------------|
-| `GHS_SERVER_URL`         | *(required)*          | Your Channels DVR server, e.g. `http://192.168.1.10:8089`             |
+| `GHS_CHANNELS_DVR_URL`   | *(required)*          | Your Channels DVR server (not this service's host), e.g. `http://192.168.1.10:8089`. `GHS_SERVER_URL` is the older name and still works. |
 | `GHS_POLL_SECS`          | `900` (15 min)         | How often to re-poll the guide feed                                    |
 | `GHS_RETENTION_SECS`     | `172800` (48h)         | How long a captured slot is kept after it airs                         |
 | `GHS_FETCH_WINDOW_SECS`  | `7200` (2h)            | How far forward each poll asks the DVR for                             |
@@ -37,9 +39,27 @@ All configuration is environment variables:
 - `GET /health` — `{"status":"ok","programs_cached":N}`, for a simple
   reachability check.
 
-## Running it unattended
+## Installing it from DVRDesk (recommended)
 
-There's no installer here yet — run the binary under whatever your host
-already uses for long-running processes (a `systemd` unit, a Docker
-container, a NAS's task scheduler, etc.), pointing `GHS_DATA_PATH` at a
-location that persists across restarts.
+DVRDesk Native ships with this service. On the PC that runs Channels DVR (or
+another always-on PC), open DVRDesk's **Settings → Programming History** and
+click **Install on This PC**. It sets everything from the active server and
+starts the service at boot:
+
+- **Linux:** a `systemd --user` unit, with `loginctl enable-linger` so it
+  runs without anyone logged in. No sudo needed.
+- **Windows:** a scheduled task that runs as SYSTEM at startup, plus a
+  Windows Firewall rule opening the port to private networks. Windows asks
+  for administrator permission once.
+
+DVRDesk on other PCs checks for the service on the Channels DVR server's
+host at port 8790 and uses it automatically when Programming History is
+blank.
+
+## Running it unattended yourself
+
+Run the binary under whatever your host already uses for long-running
+processes (a `systemd` unit, a Docker container, a NAS's task scheduler,
+etc.), pointing `GHS_DATA_PATH` at a location that persists across
+restarts. Use port 8790 on the Channels DVR host if you want DVRDesk
+clients to find it automatically.

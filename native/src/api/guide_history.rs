@@ -29,6 +29,26 @@ pub async fn fetch_history(
         .map_err(|e| format!("Failed to parse history service response: {e}"))
 }
 
+/// Auto-discovery's check: `true` only if a guide history service (not just
+/// anything that answers HTTP) responds at `service_url` within a few
+/// seconds.
+pub async fn is_history_service(service_url: &str) -> bool {
+    let url = format!("{}/health", service_url.trim_end_matches('/'));
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    else {
+        return false;
+    };
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<serde_json::Value>()
+            .await
+            .is_ok_and(|body| body.get("programs_cached").is_some()),
+        _ => false,
+    }
+}
+
 /// Used by the Settings "Test" button — just confirms something answers at
 /// that URL, doesn't need the response body.
 pub async fn probe(service_url: &str) -> Result<(), String> {

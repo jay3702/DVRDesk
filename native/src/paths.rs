@@ -30,6 +30,12 @@ pub fn data_dir() -> Option<PathBuf> {
     project_dirs().map(|d| d.data_dir().to_path_buf())
 }
 
+/// Machine-local data that shouldn't roam with a Windows profile — the
+/// downloaded libmpv (see `mpv_install.rs`). Same as `data_dir` elsewhere.
+pub fn local_data_dir() -> Option<PathBuf> {
+    project_dirs().map(|d| d.data_local_dir().to_path_buf())
+}
+
 /// This app's own cache and log file, when the user hasn't configured a
 /// directory of their own.
 pub fn cache_dir() -> Option<PathBuf> {

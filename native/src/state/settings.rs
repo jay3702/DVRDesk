@@ -44,7 +44,7 @@ pub struct DeployTarget {
     /// Only meaningful when `kind == Remote` — ignored for `Local`, which
     /// always installs under this app's own data directory instead.
     pub remote_install_dir: String,
-    /// -> `GHS_SERVER_URL` on the deployed instance — the Channels DVR
+    /// -> `GHS_CHANNELS_DVR_URL` on the deployed instance — the Channels DVR
     /// server *that instance* should poll (usually the same one this app
     /// itself points at, but kept independent since a remote box might not
     /// reach the DVR via the same URL this app does).

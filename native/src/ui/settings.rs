@@ -41,6 +41,9 @@ pub struct SettingsState {
     history_url_draft: String,
     history_probe_in_flight: bool,
     history_probe_result: Option<Result<(), String>>,
+    /// Set by "Install on This PC"; once that install reports Running, the
+    /// Programming History URL is pointed at it and this is cleared.
+    this_pc_install_pending: bool,
 
     download_dir_draft: String,
     buffer_dir_draft: String,
@@ -121,6 +124,7 @@ impl SettingsState {
             history_url_draft: settings.history_service_url.clone().unwrap_or_default(),
             history_probe_in_flight: false,
             history_probe_result: None,
+            this_pc_install_pending: false,
 
             download_dir_draft: settings.download_dir.clone(),
             buffer_dir_draft: settings.buffer_dir.clone(),
@@ -145,6 +149,12 @@ impl SettingsState {
     pub fn probe_completed(&mut self, server_id: &str, reachable: bool) {
         self.probe_in_flight.remove(server_id);
         self.probe_results.insert(server_id.to_string(), reachable);
+    }
+
+    /// Keeps the URL field in step when the URL is set outside this screen
+    /// (auto-discovery of a service on the DVR's host).
+    pub fn history_url_changed(&mut self, url: &str) {
+        self.history_url_draft = url.to_string();
     }
 
     pub fn history_probe_completed(&mut self, result: Result<(), String>) {
@@ -697,14 +707,17 @@ pub fn show(
         ui.add_space(8.0);
         ui.separator();
 
+        this_pc_history_ui(ui, state, settings, deploys, &mut action);
+        ui.add_space(8.0);
+        ui.separator();
+
         ui.heading("Deploy & Manage Instances (optional)");
         ui.label(
             "Create → Test → Deploy → Test a guide-history-service instance, either on this \
              machine or a remote Linux host over SSH (key-based auth only — no password field; \
-             relies on ssh-agent or a key file you point at below). Building and transferring \
-             requires a full checkout of this repo (the guide-history-service source next to \
-             this app's own) — this is a developer/self-hosting workflow, not a packaged \
-             installer.",
+             relies on ssh-agent or a key file you point at below). Installs the copy of the \
+             service that comes with DVRDesk; a remote host must have the same CPU \
+             architecture as this PC. For the usual setup, use Install on This PC above.",
         );
         let mut remove_idx: Option<usize> = None;
         for (i, target) in state.draft_deploy_targets.iter_mut().enumerate() {
@@ -805,9 +818,6 @@ pub fn show(
                     }
                     Some(DeployStatus::ConnectionFailed(e)) => {
                         ui.colored_label(egui::Color32::RED, format!("Connection failed: {e}"));
-                    }
-                    Some(DeployStatus::Building) => {
-                        ui.colored_label(egui::Color32::GRAY, "Building release binary…");
                     }
                     Some(DeployStatus::Transferring) => {
                         ui.colored_label(egui::Color32::GRAY, "Transferring binary…");
@@ -916,4 +926,138 @@ pub fn show(
     });
 
     action
+}
+
+/// `DeployTarget` id for the one-click install on this PC — kept apart from
+/// the ids of the configurable targets below it.
+const THIS_PC_TARGET_ID: &str = "this-pc";
+
+/// Programming History's one-click install: the guide history service on
+/// this PC, configured from the active server, with no other input. Meant
+/// for the PC that runs Channels DVR (or another always-on PC); DVRDesk on
+/// other PCs finds it on the DVR's host by itself.
+fn this_pc_history_ui(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    settings: &mut AppSettings,
+    deploys: &Deploys,
+    action: &mut SettingsAction,
+) {
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Run the history service on this PC").strong());
+    ui.label(
+        "Install it on the PC that runs Channels DVR, or another PC that stays on. It starts \
+         with the PC, even when nobody is signed in. DVRDesk on your other PCs finds it \
+         automatically when it runs on the Channels DVR computer.",
+    );
+    if cfg!(windows) {
+        ui.label(
+            egui::RichText::new("Windows will ask for administrator permission.")
+                .small()
+                .weak(),
+        );
+    }
+
+    let dvr_url = settings
+        .servers
+        .iter()
+        .find(|s| Some(&s.id) == settings.active_server_id.as_ref())
+        .map(|s| s.url.clone());
+    let target = dvr_url
+        .as_ref()
+        .map(|url| DeployTarget::new_local(THIS_PC_TARGET_ID.to_string(), url.clone()));
+    let status = deploys.status(THIS_PC_TARGET_ID);
+    let busy = matches!(
+        status,
+        Some(
+            DeployStatus::TestingConnection
+                | DeployStatus::Transferring
+                | DeployStatus::Installing
+                | DeployStatus::HealthChecking
+                | DeployStatus::Removing
+        )
+    );
+
+    ui.horizontal(|ui| {
+        let install = ui.add_enabled(
+            target.is_some() && !busy,
+            egui::Button::new("Install on This PC"),
+        );
+        if install.clicked() {
+            if let Some(t) = &target {
+                state.this_pc_install_pending = true;
+                action.run_deploy_target = Some((THIS_PC_TARGET_ID.to_string(), t.clone()));
+            }
+        }
+        if target.is_none() {
+            install.on_disabled_hover_text("Add a Channels DVR server first.");
+        }
+        if ui
+            .add_enabled(target.is_some() && !busy, egui::Button::new("Check"))
+            .clicked()
+        {
+            if let Some(t) = &target {
+                action.check_deploy_status = Some((THIS_PC_TARGET_ID.to_string(), t.clone()));
+            }
+        }
+        if ui
+            .add_enabled(target.is_some() && !busy, egui::Button::new("Uninstall"))
+            .clicked()
+        {
+            if let Some(t) = &target {
+                action.remove_deploy_target = Some((THIS_PC_TARGET_ID.to_string(), t.clone()));
+            }
+        }
+    });
+
+    match status {
+        None => {}
+        Some(DeployStatus::TestingConnection) => {
+            ui.colored_label(egui::Color32::GRAY, "Checking…");
+        }
+        Some(DeployStatus::ConnectionOk { .. }) => {}
+        Some(DeployStatus::ConnectionFailed(e)) | Some(DeployStatus::Failed(e)) => {
+            state.this_pc_install_pending = false;
+            ui.colored_label(egui::Color32::RED, e);
+        }
+        Some(DeployStatus::Transferring) | Some(DeployStatus::Installing) => {
+            ui.colored_label(egui::Color32::GRAY, "Installing…");
+        }
+        Some(DeployStatus::HealthChecking) => {
+            ui.colored_label(egui::Color32::GRAY, "Starting…");
+        }
+        Some(DeployStatus::Running { programs_cached, warning }) => {
+            ui.colored_label(
+                egui::Color32::GREEN,
+                format!("Running on this PC — {programs_cached} programs recorded so far."),
+            );
+            if let Some(w) = warning {
+                ui.colored_label(egui::Color32::from_rgb(224, 123, 0), w);
+            }
+            if state.this_pc_install_pending {
+                state.this_pc_install_pending = false;
+                if let Some(t) = &target {
+                    let url = format!("http://127.0.0.1:{}", t.listen_port);
+                    state.history_url_draft = url.clone();
+                    settings.history_service_url = Some(url);
+                    action.settings_changed = true;
+                }
+            }
+        }
+        Some(DeployStatus::Removing) => {
+            ui.colored_label(egui::Color32::GRAY, "Uninstalling…");
+        }
+        Some(DeployStatus::Removed) => {
+            ui.colored_label(egui::Color32::GRAY, "Uninstalled from this PC.");
+            if settings
+                .history_service_url
+                .as_deref()
+                .is_some_and(|u| u.starts_with("http://127.0.0.1:"))
+            {
+                state.history_url_draft.clear();
+                settings.history_service_url = None;
+                action.settings_changed = true;
+            }
+        }
+    }
 }

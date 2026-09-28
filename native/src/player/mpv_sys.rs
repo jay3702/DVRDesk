@@ -136,19 +136,31 @@ pub struct MpvApi {
     _library: Library,
 }
 
-/// Per-OS candidate library names/paths, tried in order.
-fn candidates() -> &'static [&'static str] {
+/// Per-OS candidate library names/paths, tried in order. On Windows the
+/// copy downloaded by `mpv_install` comes first; bare names are then
+/// resolved by the normal DLL search (the app's folder, System32, PATH).
+fn candidates() -> Vec<std::ffi::OsString> {
+    let mut out: Vec<std::ffi::OsString> = Vec::new();
     if cfg!(target_os = "windows") {
-        &["mpv-2.dll", "mpv-1.dll", "libmpv-2.dll"]
+        if let Some(path) = crate::mpv_install::downloaded_libmpv_path() {
+            if path.is_file() {
+                out.push(path.into_os_string());
+            }
+        }
+        out.extend(["mpv-2.dll", "mpv-1.dll", "libmpv-2.dll"].map(Into::into));
     } else if cfg!(target_os = "macos") {
-        &[
-            "libmpv.2.dylib",
-            "/opt/homebrew/lib/libmpv.2.dylib",
-            "/usr/local/lib/libmpv.2.dylib",
-        ]
+        out.extend(
+            [
+                "libmpv.2.dylib",
+                "/opt/homebrew/lib/libmpv.2.dylib",
+                "/usr/local/lib/libmpv.2.dylib",
+            ]
+            .map(Into::into),
+        );
     } else {
-        &["libmpv.so.2", "libmpv.so.1", "libmpv.so"]
+        out.extend(["libmpv.so.2", "libmpv.so.1", "libmpv.so"].map(Into::into));
     }
+    out
 }
 
 static API: OnceLock<Result<MpvApi, String>> = OnceLock::new();
@@ -161,19 +173,20 @@ pub fn library() -> Result<&'static MpvApi, &'static str> {
 unsafe fn load() -> Result<MpvApi, String> {
     let mut last_err = String::new();
     let mut lib_opt: Option<Library> = None;
-    for name in candidates() {
+    let candidates = candidates();
+    for name in &candidates {
         match Library::new(name) {
             Ok(lib) => {
                 lib_opt = Some(lib);
                 break;
             }
-            Err(e) => last_err = format!("{name}: {e}"),
+            Err(e) => last_err = format!("{}: {e}", name.to_string_lossy()),
         }
     }
     let lib = lib_opt.ok_or_else(|| {
         format!(
             "libmpv not found (tried {:?}); last error: {last_err}. Install mpv/libmpv2.",
-            candidates()
+            candidates
         )
     })?;
 

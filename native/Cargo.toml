@@ -23,11 +23,17 @@ egui_extras = { version = "0.29", features = ["all_loaders"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 quick-xml = "0.36"
 rusqlite = { version = "0.40", features = ["bundled"] }
+# PowerShell -EncodedCommand for the Windows history-service install (deploy.rs).
+base64 = "0.22"
 
 # Reads the old Tauri app's WebView2 localStorage for the settings import
 # (`src/migration.rs`). Windows only — Linux reads WebKitGTK's SQLite instead.
 [target.'cfg(windows)'.dependencies]
 rusty-leveldb = "4.0.1"
+# Downloading libmpv on first run (`src/mpv_install.rs`): the mpv-dev
+# archive is 7z with a BCJ2 filter, which sevenz-rust2 handles.
+sevenz-rust2 = "0.23"
+sha2 = "0.10"
 
 # Embeds the .exe's own icon (Explorer, taskbar pinning, Alt-Tab) — see
 # build.rs. Build scripts compile for the host, and the Windows release job
@@ -54,6 +60,9 @@ section = "video"
 priority = "optional"
 assets = [
     ["target/release/dvrdesk-native", "usr/bin/", "755"],
+    # Bundled so Settings can install the guide history service on this PC
+    # without building it (see src/deploy.rs). CI builds it before packaging.
+    ["../guide-history-service/target/release/guide-history-service", "usr/lib/dvrdesk-native/", "755"],
     ["packaging/linux/dvrdesk-native.desktop", "usr/share/applications/", "644"],
     ["../src-tauri/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/dvrdesk-native.png", "644"],
 ]

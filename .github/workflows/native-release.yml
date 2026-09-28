@@ -17,11 +17,10 @@
 #   either, so that specific build is GPL-licensed. Redistributing it inside
 #   this app's own shipped .zip would put the whole distributed bundle under
 #   GPL obligations, which isn't a decision to make silently by picking a
-#   convenient download URL. Instead the Windows .zip ships the bare .exe
-#   plus a short README pointing the user at installing mpv themselves
-#   (e.g. `winget install mpv-player.mpv-CI`, confirmed to be a real current
-#   winget package) — same shape as the Linux .deb's `Depends: libmpv2`,
-#   just without a package manager to declare it to. Building mpv/FFmpeg
+#   convenient download URL. Instead the app offers to download libmpv from
+#   that same publisher on first run (native/src/mpv_install.rs), so the
+#   user fetches it rather than this release redistributing it. The winget
+#   mpv package is no substitute: it contains mpv.exe but no libmpv DLL. Building mpv/FFmpeg
 #   from source under controlled LGPL flags, the way Clicker
 #   (github.com/mackid1993/Clicker, this rewrite's own inspiration) does for
 #   its own releases, would let this app bundle libmpv directly again — a
@@ -117,38 +116,15 @@ jobs:
         run: cargo build --release --manifest-path guide-history-service/Cargo.toml
 
       # mpv/libmpv is deliberately NOT bundled here — see this file's header
-      # comment for why (the one convenient prebuilt Windows libmpv source
-      # checked out is GPL-licensed, confirmed directly from its own build
-      # scripts, and redistributing it inside this app's .zip isn't a call
-      # to make silently). Ship a short README pointing the user at getting
-      # mpv themselves instead, matching the Linux .deb's `Depends:
-      # libmpv2` in spirit if not in mechanism.
-      - name: Write Windows README
-        shell: pwsh
-        run: |
-          # A PowerShell here-string's closing `"@` must be the first two
-          # characters on its line — indenting it to match this YAML block
-          # (as a naive multi-line string would) breaks that, so this is
-          # built as a plain joined array instead.
-          $lines = @(
-            "DVRDesk Native for Windows",
-            "===========================",
-            "",
-            "This app needs mpv (specifically mpv-2.dll or libmpv-2.dll) to play",
-            "video. It is not bundled with this download.",
-            "",
-            "To install it:",
-            "  winget install mpv-player.mpv-CI",
-            "or download a build from https://mpv.io/installation/ and copy",
-            "mpv-2.dll into this same folder, next to dvrdesk-native.exe."
-          )
-          $lines -join "`n" | Set-Content -Path native/target/release/README-Windows.txt
-
+      # comment for why. The zip's README (native/packaging/windows/) covers
+      # the in-app mpv download and setting up the Guide History service.
       - name: Package dvrdesk-native
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path native/target/release/dvrdesk-native.exe, native/target/release/README-Windows.txt `
+          # guide-history-service.exe rides along so Settings can install it
+          # on this PC (native/src/deploy.rs looks for it next to the app).
+          Compress-Archive -Path native/target/release/dvrdesk-native.exe, native/packaging/windows/README-Windows.txt, guide-history-service/target/release/guide-history-service.exe `
             -DestinationPath dist/DVRDesk-Native-Windows-x86_64.zip -Force
 
       - name: Package guide-history-service

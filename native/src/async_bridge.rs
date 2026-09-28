@@ -104,6 +104,9 @@ pub enum Msg {
     },
     GuideHistoryLoaded(Result<Vec<crate::api::guide::GuideProgram>, String>),
     HistoryServiceProbeResult(Result<(), String>),
+    /// A guide history service answered on the active DVR server's host
+    /// (see `App::discover_history_service`).
+    HistoryServiceDiscovered { server_id: String, url: String },
     /// Delivered when a past guide slot's recorded-status hit resolves to a
     /// real `Recording` — the caller navigates to it and (if the series
     /// has a pass) shows the pass indicator.

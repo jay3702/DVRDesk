@@ -5,6 +5,7 @@ pub mod library;
 pub mod live;
 pub mod media_card;
 pub mod movies;
+pub mod mpv_needed;
 pub mod player_overlay;
 pub mod recent;
 pub mod recording_detail;
