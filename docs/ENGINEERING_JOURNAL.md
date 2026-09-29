@@ -12,6 +12,23 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native v2.2.0
+
+### 2026-09-29 - Native: Windows ARM64 and Linux AppImage releases
+
+- Request: 1.x shipped a Windows ARM64 installer and Linux AppImages; Native only had x86_64 `.deb` and Windows zip.
+- Solution:
+  - `native-release.yml` builds each platform for x86_64 and aarch64. Linux arm64 uses the `ubuntu-22.04-arm` runner. Windows arm64 cross-compiles on the x64 runner with clang-cl, because `ring` (via rustls) needs clang for that target, which is the same setup 1.x's `release.yml` uses. The arm64 jobs are allowed to fail so they can't block the draft.
+  - The AppImage (`native/packaging/linux/build-appimage.sh`) contains the app and guide-history-service in `usr/bin`, where `deploy.rs` looks for the service. libmpv isn't bundled, for the same GPL reason as on Windows. The app dlopens the system's libmpv and nothing else is linked, so no other libraries need bundling.
+  - The in-app mpv download chose `mpv-dev-x86_64-*` unconditionally, which would install the wrong DLL on ARM64. It now picks the archive matching the build's architecture. shinchiro publishes `mpv-dev-aarch64-*`.
+- Validation: the x86_64 AppImage built locally with the script, launched and ran without errors, and contains both binaries. None of the arm64 builds have run yet; this release's CI run is their first test.
+
+### 2026-09-29 - Native: selectable playback speed
+
+- Request: a user asked for playback speed control.
+- Solution: a Speed dropdown (0.5x to 2x) in the player controls, using mpv's `speed` property (pitch-corrected by default). It's hidden for live channels, which always play at 1x. `NowPlaying.live` was added because live channels and library videos both had `recording_kind: None`. The chosen speed is kept for the session. It's set on every load because mpv keeps `speed` across `loadfile`, which would otherwise carry a fast speed into a live channel.
+- Validation: builds and tests pass. Not yet tried against real playback.
+
 ## Native v2.1.2
 
 ### 2026-09-28 - Native: mpv on Windows downloads from inside the app
