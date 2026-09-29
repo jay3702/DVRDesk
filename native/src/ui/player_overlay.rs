@@ -20,6 +20,13 @@ use crate::state::settings::{KeybindingsConfig, SkipIntervalsConfig};
 /// auto-hide.
 const CONTROLS_HIDE_DELAY: Duration = Duration::from_secs(3);
 
+/// Playback speeds offered for recordings and videos.
+const SPEEDS: [f64; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+fn speed_label(speed: f64) -> String {
+    format!("{speed}x")
+}
+
 pub struct PlayerOverlayAction {
     /// Caller tears down playback (stop the player, clear `now_playing`)
     /// since this module doesn't own that state.
@@ -30,6 +37,8 @@ pub struct PlayerOverlayAction {
     pub new_caption_mode: Option<CaptionMode>,
     /// `Some` the frame the user toggles commercial auto-skip.
     pub new_skip_ads: Option<bool>,
+    /// `Some` the frame the user picks a different playback speed.
+    pub new_speed: Option<f64>,
     /// `Some` the frame the user toggles the stats-for-nerds panel.
     pub new_show_stats: Option<bool>,
     /// The user clicked Save Frame — caller picks the output path (it owns
@@ -45,6 +54,7 @@ pub fn show(
     caption_tracks: &[CaptionTrack],
     caption_mode: CaptionMode,
     skip_ads: bool,
+    speed: f64,
     showing_skip_toast: bool,
     skip_intervals: SkipIntervalsConfig,
     player_keybindings: &KeybindingsConfig,
@@ -55,6 +65,7 @@ pub fn show(
     let mut close_clicked = false;
     let mut new_caption_mode = None;
     let mut new_skip_ads = None;
+    let mut new_speed = None;
     let mut new_show_stats = None;
     let mut save_frame = false;
     let screen_rect = ctx.screen_rect();
@@ -193,6 +204,21 @@ pub fn show(
                                                 .clicked()
                                         {
                                             new_caption_mode = Some(CaptionMode::PyCaptions);
+                                        }
+                                    });
+                            }
+
+                            if !now_playing.live {
+                                egui::ComboBox::from_id_salt("playback_speed")
+                                    .selected_text(format!("Speed: {}", speed_label(speed)))
+                                    .show_ui(ui, |ui| {
+                                        for s in SPEEDS {
+                                            if ui
+                                                .selectable_label(speed == s, speed_label(s))
+                                                .clicked()
+                                            {
+                                                new_speed = Some(s);
+                                            }
                                         }
                                     });
                             }
@@ -420,6 +446,7 @@ pub fn show(
         close: close_clicked,
         new_caption_mode,
         new_skip_ads,
+        new_speed,
         new_show_stats,
         save_frame,
     }

@@ -25,4 +25,7 @@ pub struct NowPlaying {
     /// `None` means live (no resume/watched-mutation support), matching the
     /// old store's `recordingKind: 'episode' | 'movie' | null`.
     pub recording_kind: Option<RecordingKind>,
+    /// A live channel rather than a recording or library video — no
+    /// playback speed control, since there's nothing ahead to speed into.
+    pub live: bool,
 }

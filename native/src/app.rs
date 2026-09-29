@@ -65,6 +65,10 @@ pub struct App {
     disabled_ad_blocks: HashSet<usize>,
     skip_toast_until: Option<Instant>,
 
+    /// Playback speed for recordings and videos, kept for the rest of the
+    /// session once picked. Live channels always play at 1x.
+    playback_speed: f64,
+
     /// Last time the player overlay saw pointer activity (movement, click,
     /// or press) — reset whenever a new playback session starts. Drives
     /// auto-hiding the live-channel control chrome after a few seconds of
@@ -191,6 +195,8 @@ impl App {
             disabled_ad_blocks: HashSet::new(),
             skip_toast_until: None,
 
+            playback_speed: 1.0,
+
             player_controls_active_since: Instant::now(),
 
             show_stats: false,
@@ -252,6 +258,7 @@ impl App {
                     manifest_url: Some(network_url),
                     resume_time: rec.playback_time,
                     recording_kind: Some(rec.recording_kind()),
+                    live: false,
                 },
             );
             return;
@@ -294,6 +301,7 @@ impl App {
                 manifest_url: Some(url.clone()),
                 resume_time: video.playback_time,
                 recording_kind: None,
+                live: false,
             },
         );
     }
@@ -317,6 +325,7 @@ impl App {
                 manifest_url: Some(url.clone()),
                 resume_time: 0.0,
                 recording_kind: None,
+                live: true,
             },
         );
     }
@@ -329,6 +338,7 @@ impl App {
             return;
         };
         player.load_url(url);
+        player.set_speed(if now_playing.live { 1.0 } else { self.playback_speed });
 
         self.now_playing = Some(now_playing);
         self.has_applied_resume = false;
@@ -919,6 +929,7 @@ impl App {
                                 manifest_url: Some(url),
                                 resume_time: recording.playback_time,
                                 recording_kind: Some(recording.recording_kind()),
+                                live: false,
                             },
                         );
                     }
@@ -2227,6 +2238,7 @@ impl eframe::App for App {
         let mut close_playback = false;
         let mut new_caption_mode = None;
         let mut new_skip_ads = None;
+        let mut new_speed = None;
         let mut new_show_stats = None;
         let mut save_frame = false;
         if let Some(now_playing) = &self.now_playing {
@@ -2241,6 +2253,7 @@ impl eframe::App for App {
                     &self.caption_tracks,
                     self.caption_mode,
                     self.skip_ads,
+                    self.playback_speed,
                     showing_toast,
                     self.settings.skip_intervals,
                     &self.settings.keybindings,
@@ -2251,6 +2264,7 @@ impl eframe::App for App {
                 close_playback = action.close;
                 new_caption_mode = action.new_caption_mode;
                 new_skip_ads = action.new_skip_ads;
+                new_speed = action.new_speed;
                 new_show_stats = action.new_show_stats;
                 save_frame = action.save_frame;
             }
@@ -2266,6 +2280,12 @@ impl eframe::App for App {
         }
         if let Some(skip_ads) = new_skip_ads {
             self.skip_ads = skip_ads;
+        }
+        if let Some(speed) = new_speed {
+            self.playback_speed = speed;
+            if let Ok(player) = &self.player {
+                player.set_speed(speed);
+            }
         }
         if close_playback {
             self.stop_playback(ctx);

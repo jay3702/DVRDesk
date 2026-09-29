@@ -120,6 +120,14 @@ impl Player {
         }
     }
 
+    /// Playback speed multiplier. mpv keeps it across `loadfile`, so callers
+    /// set it for every new file. Audio pitch is corrected by default.
+    pub fn set_speed(&self, speed: f64) {
+        unsafe {
+            set_property_runtime(self.api, self.handle, "speed", &speed.to_string());
+        }
+    }
+
     pub fn position_secs(&self) -> Option<f64> {
         unsafe { get_double(self.api, self.handle, "time-pos") }
     }
