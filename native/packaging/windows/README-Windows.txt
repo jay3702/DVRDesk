@@ -19,7 +19,8 @@ The first time you run DVRDesk, it offers to download it for you.
 Click Download mpv, then Restart DVRDesk when it's done.
 
 To install it by hand instead: download the newest
-mpv-dev-x86_64-<date>-git-<id>.7z from
+mpv-dev-x86_64-<date>-git-<id>.7z (or, for the ARM64 download of
+DVRDesk, mpv-dev-aarch64-<date>-git-<id>.7z) from
   https://github.com/shinchiro/mpv-winbuild-cmake/releases
 open it with 7-Zip, and copy libmpv-2.dll into this folder, next to
 dvrdesk-native.exe.

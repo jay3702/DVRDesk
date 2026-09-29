@@ -20,11 +20,21 @@ pub fn downloaded_libmpv_path() -> Option<PathBuf> {
     crate::paths::local_data_dir().map(|d| d.join("mpv").join("libmpv-2.dll"))
 }
 
-/// `mpv-dev-x86_64-YYYYMMDD-git-<hash>.7z` — the baseline x86-64 build,
+/// shinchiro's name for this build's architecture in its archive names.
+#[cfg(target_arch = "aarch64")]
+#[cfg_attr(not(windows), allow(dead_code))]
+const ARCHIVE_ARCH: &str = "aarch64";
+#[cfg(not(target_arch = "aarch64"))]
+#[cfg_attr(not(windows), allow(dead_code))]
+const ARCHIVE_ARCH: &str = "x86_64";
+
+/// `mpv-dev-<arch>-YYYYMMDD-git-<hash>.7z` — on x86-64 the baseline build,
 /// not the `-v3` one that needs AVX2.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn is_dev_archive(name: &str) -> bool {
-    name.strip_prefix("mpv-dev-x86_64-")
+fn is_dev_archive(name: &str, arch: &str) -> bool {
+    name.strip_prefix("mpv-dev-")
+        .and_then(|rest| rest.strip_prefix(arch))
+        .and_then(|rest| rest.strip_prefix('-'))
         .and_then(|rest| rest.strip_suffix(".7z"))
         .and_then(|rest| rest.split('-').next())
         .is_some_and(|date| date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()))
@@ -104,7 +114,7 @@ mod windows {
         let asset = release
             .assets
             .into_iter()
-            .find(|a| super::is_dev_archive(&a.name))
+            .find(|a| super::is_dev_archive(&a.name, super::ARCHIVE_ARCH))
             .ok_or("The latest mpv build doesn't include the expected download.")?;
         let expected = asset
             .digest
@@ -180,9 +190,18 @@ mod windows {
 mod tests {
     #[test]
     fn picks_baseline_x86_64_archive() {
-        assert!(super::is_dev_archive("mpv-dev-x86_64-20260928-git-e470f8986e.7z"));
-        assert!(!super::is_dev_archive("mpv-dev-x86_64-v3-20260928-git-e470f8986e.7z"));
-        assert!(!super::is_dev_archive("mpv-dev-aarch64-20260928-git-e470f8986e.7z"));
-        assert!(!super::is_dev_archive("mpv-x86_64-20260928-git-e470f8986e.7z"));
+        let pick = |name| super::is_dev_archive(name, "x86_64");
+        assert!(pick("mpv-dev-x86_64-20260928-git-e470f8986e.7z"));
+        assert!(!pick("mpv-dev-x86_64-v3-20260928-git-e470f8986e.7z"));
+        assert!(!pick("mpv-dev-aarch64-20260928-git-e470f8986e.7z"));
+        assert!(!pick("mpv-x86_64-20260928-git-e470f8986e.7z"));
+    }
+
+    #[test]
+    fn picks_aarch64_archive() {
+        let pick = |name| super::is_dev_archive(name, "aarch64");
+        assert!(pick("mpv-dev-aarch64-20260928-git-e470f8986e.7z"));
+        assert!(!pick("mpv-dev-x86_64-20260928-git-e470f8986e.7z"));
+        assert!(!pick("mpv-aarch64-20260928-git-e470f8986e.7z"));
     }
 }
