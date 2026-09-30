@@ -1,0 +1,212 @@
+# DVRDesk 1.x (legacy)
+
+This is the original DVRDesk, built on Tauri with WebView playback (hls.js). It's been replaced by [DVRDesk Native](../README.md), which plays more reliably and gets all new features. 1.x still gets fixes, and its releases use plain `v*` tags, such as [v1.15.0](https://github.com/jay3702/DVRDesk/releases/tag/v1.15.0).
+
+To move your servers and preferences to Native, see [Coming from DVRDesk 1.x](../README.md#coming-from-dvrdesk-1x).
+
+## Requirements
+
+- Windows 10/11 or Linux
+- A reachable Channels DVR server on your network
+- On Linux, the runtime requires WebKit2GTK and GStreamer codec support for HLS playback:
+  - **AppImage**: bundles GStreamer itself, no extra packages needed.
+  - **.deb**: `apt`/`dpkg` installs the required packages automatically (`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `gstreamer1.0-libav`, `libayatana-appindicator3-1`, `xdg-utils`).
+  - If HLS still fails with `HLS playback is not supported in this environment.`, install the packages above manually.
+
+## Important Shared Folder Requirement
+
+If you want SRT sidecar captions to work for all clients/users, the Channels DVR root recording folder must be shared and readable by everyone who will run DVRDesk.
+
+Why this matters:
+
+- DVRDesk can stream video from DVR HTTP endpoints, but sidecar `.srt` loading requires filesystem access to the recording path.
+- The app maps recording paths to your configured Windows UNC share path.
+
+Example share path:
+
+`\\192.168.3.150\AllMedia\Channels`
+
+Recommendations:
+
+- Share the Channels root folder (or the exact DVR recording root) from the storage host.
+- Grant read permissions to all users/machines that will use DVRDesk.
+- Verify each user can browse the UNC path in Windows Explorer.
+
+## Install
+
+### Option 1: Use a Release Installer (recommended)
+
+Download from the newest `v*` release, such as [v1.15.0](https://github.com/jay3702/DVRDesk/releases/tag/v1.15.0):
+
+- **Windows:** the `.msi` (recommended) or the `-setup.exe` if MSI is blocked by policy, for x64 or ARM64.
+- **Linux:** the `.AppImage` or `.deb`, for x86_64 or arm64.
+
+Building locally puts the same bundles under `src-tauri/target/release/bundle/`.
+
+### Option 2: Run from Source
+
+1. Install prerequisites:
+	- Node.js 20+
+	- Rust toolchain (stable)
+	- Visual Studio C++ Build Tools (for Tauri on Windows)
+2. Clone repo and install dependencies:
+
+```powershell
+npm install
+```
+
+3. Start in development mode:
+
+```powershell
+npm run tauri dev
+```
+
+4. Build production bundles:
+
+```powershell
+npm run tauri build
+```
+
+## Configuration
+
+Open Settings in the app and configure the following.
+
+### 1) Channels DVR Server URL
+
+- Field: `Channels DVR Server URL`
+- Format: `http://<server-ip>:8089`
+- Example: `http://192.168.3.150:8089`
+
+Use the `Test Connection` button to confirm the app can reach your DVR and read shows/movies/episodes.
+
+### 2) Storage Share Path (for SRT sidecars)
+
+- Field: `Storage Share Path`
+- Purpose: locate `.srt` files next to recordings
+- Use a UNC path to your DVR storage root
+- Example: `\\192.168.3.150\AllMedia\Channels`
+
+Notes:
+
+- Leave this blank to disable SRT sidecar loading.
+- Broadcast captions can still work without a share path.
+- The path is stored locally per user in app local storage.
+
+## Caption Modes
+
+The player exposes caption modes based on track availability:
+
+- Off
+- Broadcast (from stream text tracks)
+- SRT (from sidecar subtitle file)
+
+If both are available, you can switch between them from the player controls.
+
+## Troubleshooting
+
+### Can stream video but no SRT captions
+
+- Verify `Storage Share Path` points to the correct DVR root share
+- Confirm the `.srt` file exists next to the recording on disk
+- Confirm current Windows user can read the share path
+
+### Connection test fails
+
+- Verify DVR server URL includes port (usually `8089`)
+- Confirm server is reachable from the client machine
+- Confirm firewall rules allow access
+
+## Tech Stack
+
+- Tauri 2
+- React 19 + TypeScript + Vite
+- Zustand for app state
+- HLS.js for playback
+- Tauri HTTP plugin for API requests
+
+## Release History
+
+### v1.10.0 (2026-05-20)
+App rebranded to DVRDesk.
+HLS.js buffer-gap resilience improvements: raised `maxBufferHole` to 0.5s and `nudgeMaxRetry` to 5; added `fragParsingError` recovery to clear confused decoder state without waiting for a downstream stall.
+API compatibility test suite added (`npm run test:api`) for validating Channels DVR server version upgrades; server version `2026.05.18.1824` approved.
+
+### v1.0.0 (2026-04-14)
+Initial release: Recent Recordings, TV Shows, Movies, Library browsing, HLS playback with broadcast and SRT sidecar captions, multi-server support, and Settings.
+
+### v1.1.0 (2026-04-15)
+Live TV view with channel browsing, per-source and Favorites filters, deduplication, and click-to-play; source diagnostics matrix for troubleshooting.
+Player "Stats for Nerds" live diagnostics overlay (toggled with Shift+S); Windows ARM64 installer added to releases.
+
+### v1.1.1 (2026-04-15)
+Fixed duplicate channels appearing in the Live Favorites filter when a channel was present across multiple tuner sources.
+
+### v1.1.8 (2026-04-16)
+Hidden channels toggle in Live TV (Settings → Live TV → Show hidden channels) to suppress source-hidden and duplicate feeds.
+Linux x64 and ARM64 build pipeline added; CI and release workflow reliability fixes across v1.1.2–v1.1.8.
+
+### v1.1.9 (2026-04-17)
+Version bump to include the hidden-channel setting in a properly tagged release; no additional user-facing changes.
+
+### v1.2.0 (2026-04-20)
+Tailscale dual-address support — app probes LAN on startup and falls back to Tailscale automatically; TV Shows redesigned to a two-level flow (show → episode detail).
+Trash and Mark as Not Recorded actions added to episode and recording detail panes; API version guard with a persistent banner warning when the server version changes; badge indicators restored on episode and movie cards.
+
+### v1.2.1 (2026-04-21)
+"Mark as Not Recorded" action is now hidden for recordings that have no associated DVR rule, where the action would have no effect.
+
+### v1.2.2 (2026-04-21)
+Sort toggle buttons (▲/▼) replace dropdowns across TV Shows and Movies; fixed Live TV heading wrapping when many source filter chips are present.
+
+### v1.3.0 (2026-04-22)
+New cross-library Search page with type filters (Any, Title, Summary, Series Name) and direct navigation to matching recordings, shows, movies, and library videos.
+Recording file path shown in episode and movie detail panes; sort direction overhaul with stacked ▲/▼ buttons and a Date Updated field option.
+
+### v1.3.1 (2026-04-23)
+Cache-first page revisits for all views (Live, TV Shows, Movies, Recent Recordings) so returning to a page renders instantly from cache while a background refresh runs.
+Progressive list rendering for large libraries; persisted sort selections with field-based default direction; resizable split-view panels for TV Shows and Library; Last Recorded sort option for TV shows.
+
+### v1.3.2 (2026-04-23)
+CI fix: removed unused state variable in `RecentRecordings` that caused TypeScript strict-mode errors and blocked all platform builds after v1.3.1.
+
+### v1.3.3 (2026-04-23)
+Fixed progressive list rendering not triggering additional scroll-fill when all initial items fit in view without producing a scrollbar.
+
+### v1.3.4 (2026-04-23)
+Added TV shows sort option for Last Recorded (by `last_recorded_at`).
+
+### v1.3.5 (2026-04-23)
+Made Last Recorded the default sort order for the TV shows list.
+
+### v1.3.6 (2026-04-24)
+Added startup check for newer DVRDesk releases; a banner appears when a newer version is available on GitHub.
+
+### v1.3.7 (2026-04-25)
+Repository-hosted API compatibility matrix replaces local approval state; improved server version detection with status endpoint fallbacks; clearer per-server compatibility messaging in Settings.
+
+### v1.3.8 (2026-04-26)
+Local bug report composer with a persistent 48-hour client error log; server IPs are redacted and replaced with configured server names in reports; connection test runs automatically when the bug report is opened.
+
+### v1.3.9 (2026-04-26)
+Fixed infinite probe loop caused by Tailscale fallback incorrectly incrementing the server change version.
+
+### v1.4.0 (2026-05-03)
+Auto-focus the first episode card when a TV show is selected, enabling keyboard navigation without a manual click.
+
+### v1.4.1 (2026-05-05)
+Full keyboard D-pad navigation across sidebar, list, and grid zones; configurable player keybindings and skip intervals in Settings.
+
+### v1.5.0 (2026-05-07)
+System/Dark/Light theme support with a CSS custom property system; theme selector in Settings under a new Appearance section; theme persisted across sessions.
+
+### v1.6.0 (2026-05-08)
+Double-click a recording in Recent Recordings to play directly; player controls (header bar and commercial timeline) auto-hide after 3 seconds of inactivity and reappear on mouse movement; fixed fullscreen video clipping on ultrawide monitors.
+
+### v1.7.0 (2026-05-08)
+Episode sort by Season/Episode number and First Aired date added to TV Shows; Release Date sort added to Movies.
+
+### v1.9.0 (2026-05-13)
+Live TV HLS improvements: `encoder=remux` no longer applied to live channel streams (it only applies to DVR file playback); live manifest resolution now prefers `/hls/master.m3u8` over bare `/hls`; URL probe switched to HEAD requests to avoid prematurely initiating a transcoding session on Channels DVR.
+
+### v1.8.0 (2026-05-09)
+Fixed SRT sidecar caption path construction on Linux; POSIX-style share paths (e.g. `/mnt/channels/Channels`) now use forward slashes instead of backslashes.

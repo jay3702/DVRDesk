@@ -173,10 +173,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Installed 1.x clients (v1.14.x and older) find updates only via
-          # /releases/latest, so a v* release must stay Latest (native
-          # releases are created with --latest=false for the same reason).
-          make_latest: 'true'
+          # DVRDesk Native holds Latest now. 1.x clients from v1.15.0 on
+          # find their updates by listing releases and picking the newest
+          # v* tag, so a 1.x release doesn't need the Latest flag.
+          make_latest: 'false'
           body_path: .github/release-notes/v1.md
           files: |
             release-artifacts/**/*.msi
