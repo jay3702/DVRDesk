@@ -3,6 +3,10 @@
 //! endpoint exists). Search only triggers on submit, not live-as-you-type,
 //! matching the old app.
 //!
+//! Also matches the TV guide (the same channels/guide data the Live screen
+//! loads): programs airing now or later, shown as "On TV" rows that open
+//! the guide scrolled to that program.
+//!
 //! Results render as a real table (`Type`/`Created Date`/`Modified Date`/
 //! `Title`/`Episode Title`/`Summary`/`Full Summary`) rather than a plain
 //! list of rows — a genuinely different shape from every other screen's
@@ -37,6 +41,16 @@ pub struct SearchState {
     pub show_partial: bool,
     pub show_unwatched: bool,
     pub include_series: bool,
+    /// Include "On TV" matches from the guide.
+    pub include_guide: bool,
+}
+
+/// Where clicking a result goes.
+#[derive(Debug, Clone)]
+pub enum SearchTarget {
+    Screen(Screen),
+    /// The Live guide, scrolled to and highlighting this airing.
+    Guide(crate::ui::live::GuideJump),
 }
 
 impl Default for SearchState {
@@ -53,6 +67,7 @@ impl Default for SearchState {
             show_partial: true,
             show_unwatched: true,
             include_series: true,
+            include_guide: true,
         }
     }
 }
@@ -85,6 +100,7 @@ enum ResultKind {
     Episode,
     Movie,
     Video,
+    Guide,
 }
 
 impl ResultKind {
@@ -94,6 +110,7 @@ impl ResultKind {
             ResultKind::Episode => 1,
             ResultKind::Movie => 2,
             ResultKind::Video => 3,
+            ResultKind::Guide => 4,
         }
     }
 
@@ -103,6 +120,7 @@ impl ResultKind {
             ResultKind::Episode => "TV Episode",
             ResultKind::Movie => "Movie",
             ResultKind::Video => "Video",
+            ResultKind::Guide => "On TV",
         }
     }
 }
@@ -118,7 +136,9 @@ struct ResultRow {
     /// shown as "—" rather than falling back to `created_at`, since that
     /// would silently claim knowledge this app doesn't actually have.
     updated_at: Option<i64>,
-    navigate_to: Screen,
+    navigate_to: SearchTarget,
+    /// "Ch 5 KHNL", for On TV rows — shown under the type.
+    channel: Option<String>,
 }
 
 fn contains_ci(haystack: &str, needle: &str) -> bool {
@@ -131,6 +151,61 @@ fn watched_filter_ok(state: &SearchState, ws: WatchedState) -> bool {
         WatchedState::Partial => state.show_partial,
         WatchedState::Unwatched => state.show_unwatched,
     }
+}
+
+/// "On TV" matches: guide programs airing now or later whose title (or
+/// description, by match type) contains the keyword. Future-only, the same
+/// rule the guide's own search uses. `created_at` carries the air time, in
+/// milliseconds like the library rows, for the date column.
+fn guide_results(
+    state: &SearchState,
+    live: &crate::ui::live::LiveState,
+    needle: &str,
+) -> Vec<ResultRow> {
+    let now = chrono::Utc::now().timestamp();
+    let Loaded::Ready(guide) = &live.guide else {
+        return Vec::new();
+    };
+    let channel_names: HashMap<&str, &str> = match &live.channels {
+        Loaded::Ready(channels) => channels
+            .iter()
+            .map(|c| (c.number.as_str(), c.name.as_str()))
+            .collect(),
+        _ => HashMap::new(),
+    };
+    let mut rows: Vec<ResultRow> = guide
+        .iter()
+        .filter(|p| p.stop > now)
+        .filter(|p| {
+            let in_title = contains_ci(&p.title, needle);
+            let in_desc = || p.desc.as_deref().is_some_and(|d| contains_ci(d, needle));
+            match state.search_type {
+                SearchType::Title | SearchType::SeriesName => in_title,
+                SearchType::Summary => in_desc(),
+                SearchType::Any => in_title || in_desc(),
+            }
+        })
+        .map(|p| ResultRow {
+            kind: ResultKind::Guide,
+            title: p.title.clone(),
+            episode_title: None,
+            summary: p.desc.clone(),
+            full_summary: None,
+            created_at: p.start * 1000,
+            updated_at: None,
+            navigate_to: SearchTarget::Guide(crate::ui::live::GuideJump {
+                channel: p.channel.clone(),
+                start: p.start,
+                title: p.title.clone(),
+            }),
+            channel: Some(match channel_names.get(p.channel.as_str()) {
+                Some(name) => format!("Ch {} {name}", p.channel),
+                None => format!("Ch {}", p.channel),
+            }),
+        })
+        .collect();
+    rows.sort_by_key(|r| r.created_at);
+    rows
 }
 
 fn compute_results(state: &SearchState) -> Vec<ResultRow> {
@@ -188,11 +263,12 @@ fn compute_results(state: &SearchState) -> Vec<ResultRow> {
                     full_summary: None,
                     created_at: s.last_recorded_at,
                     updated_at: Some(s.updated_at),
-                    navigate_to: Screen::TvShows {
+                    navigate_to: SearchTarget::Screen(Screen::TvShows {
                         show_id: Some(s.id.clone()),
                         episode_id: None,
                         filter: None,
-                    },
+                    }),
+                    channel: None,
                 });
             }
         }
@@ -234,11 +310,12 @@ fn compute_results(state: &SearchState) -> Vec<ResultRow> {
                 full_summary: e.full_summary.clone(),
                 created_at: e.created_at,
                 updated_at: Some(e.updated_at),
-                navigate_to: Screen::TvShows {
+                navigate_to: SearchTarget::Screen(Screen::TvShows {
                     show_id: e.show_id.clone(),
                     episode_id: Some(e.id.clone()),
                     filter: None,
-                },
+                }),
+                channel: None,
             });
         }
     }
@@ -272,9 +349,10 @@ fn compute_results(state: &SearchState) -> Vec<ResultRow> {
                     full_summary: m.full_summary.clone(),
                     created_at: m.created_at,
                     updated_at: Some(m.updated_at),
-                    navigate_to: Screen::Movies {
+                    navigate_to: SearchTarget::Screen(Screen::Movies {
                         movie_id: Some(m.id.clone()),
-                    },
+                    }),
+                    channel: None,
                 });
             }
         }
@@ -297,10 +375,11 @@ fn compute_results(state: &SearchState) -> Vec<ResultRow> {
                     full_summary: None,
                     created_at: v.created_at,
                     updated_at: None,
-                    navigate_to: Screen::Library {
+                    navigate_to: SearchTarget::Screen(Screen::Library {
                         group_id: v.video_group_id.clone(),
                         video_id: Some(v.id.clone()),
-                    },
+                    }),
+                    channel: None,
                 });
             }
         }
@@ -318,8 +397,13 @@ fn compute_results(state: &SearchState) -> Vec<ResultRow> {
 /// Returns `Some(screen)` the frame a result row is clicked — clicking
 /// deep-links into the owning screen rather than playing directly, matching
 /// the old app exactly.
-pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
-    let mut navigate: Option<Screen> = None;
+/// `live`: the Live screen's channels and guide, for "On TV" matches.
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut SearchState,
+    live: &crate::ui::live::LiveState,
+) -> Option<SearchTarget> {
+    let mut navigate: Option<SearchTarget> = None;
 
     ui.heading("Search");
     ui.add_space(10.0);
@@ -352,6 +436,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
         ui.checkbox(&mut state.show_partial, "Partially watched");
         ui.checkbox(&mut state.show_watched, "Watched");
         ui.checkbox(&mut state.include_series, "Include Series");
+        ui.checkbox(&mut state.include_guide, "Include TV Guide")
+            .on_hover_text("Programs airing now or later, from the guide");
     });
     ui.add_space(10.0);
     ui.separator();
@@ -374,6 +460,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
     let mut results = compute_results(state);
     if !state.include_series {
         results.retain(|r| r.kind != ResultKind::Show);
+    }
+    let guide_loading = state.include_guide && matches!(live.guide, Loaded::Idle | Loaded::Loading);
+    if state.include_guide {
+        results.extend(guide_results(state, live, state.submitted_keyword.trim()));
+    }
+    if guide_loading {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.weak("Loading the TV guide…");
+        });
     }
 
     if results.is_empty() {
@@ -431,13 +527,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
         .map(|r| {
             let summary_h = measure(r.summary.as_deref(), SUMMARY_COL_WIDTH);
             let full_h = measure(r.full_summary.as_deref(), FULL_SUMMARY_COL_WIDTH);
-            (summary_h.max(full_h) + CELL_TOP_PAD + SUMMARY_BOTTOM_GAP).max(single_line_height)
+            // On TV rows show the channel on a second line under the type.
+            let min_h = if r.channel.is_some() {
+                single_line_height + ui.fonts(|f| f.row_height(&font_id))
+            } else {
+                single_line_height
+            };
+            (summary_h.max(full_h) + CELL_TOP_PAD + SUMMARY_BOTTOM_GAP).max(min_h)
         })
         .collect();
 
     TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
+        // Click-sensing cells are what turn on egui_extras' own hover
+        // highlight for the whole row; a click anywhere on it opens the
+        // result, same as its title button.
+        .sense(egui::Sense::click())
         .column(Column::initial(90.0).at_least(60.0).clip(true)) // Type
         .column(Column::initial(150.0).at_least(100.0).clip(true)) // Created Date
         .column(Column::initial(150.0).at_least(100.0).clip(true)) // Modified Date
@@ -472,6 +578,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
                 // overrides that ui-level default.
                 row.col(|ui| {
                     ui.add(egui::Label::new(r.kind.label()).wrap());
+                    if let Some(channel) = &r.channel {
+                        ui.add(egui::Label::new(egui::RichText::new(channel).weak()).wrap());
+                    }
                 });
                 row.col(|ui| {
                     ui.add(egui::Label::new(fmt_date(r.created_at)).wrap());
@@ -528,6 +637,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut SearchState) -> Option<Screen> {
                     ui.shrink_clip_rect(clip);
                     ui.add(egui::Label::new(r.full_summary.as_deref().unwrap_or("")).wrap());
                 });
+                if row.response().clicked() {
+                    navigate = Some(r.navigate_to.clone());
+                }
             });
         });
 
@@ -539,4 +651,76 @@ fn fmt_date(ts_millis: i64) -> String {
         return String::new();
     };
     format!("{} {}", dt.format("%b %-d, %Y"), dt.format("%-I:%M %p"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::guide::GuideProgram;
+
+    fn program(channel: &str, start_offset: i64, title: &str, desc: &str) -> GuideProgram {
+        let now = chrono::Utc::now().timestamp();
+        GuideProgram {
+            channel: channel.to_string(),
+            start: now + start_offset,
+            stop: now + start_offset + 1800,
+            title: title.to_string(),
+            desc: Some(desc.to_string()),
+            categories: Vec::new(),
+            image: None,
+            series_id: None,
+            program_id: None,
+            is_new: false,
+        }
+    }
+
+    fn search(keyword: &str, search_type: SearchType, guide: Vec<GuideProgram>) -> Vec<ResultRow> {
+        let state = SearchState {
+            submitted_keyword: keyword.to_string(),
+            search_type,
+            ..SearchState::default()
+        };
+        let live = crate::ui::live::LiveState {
+            guide: Loaded::Ready(guide),
+            ..Default::default()
+        };
+        guide_results(&state, &live, keyword)
+    }
+
+    #[test]
+    fn guide_matches_are_current_or_future_and_soonest_first() {
+        let rows = search(
+            "dateline",
+            SearchType::Any,
+            vec![
+                program("5", 7200, "Dateline NBC", ""),
+                program("5", -7200, "Dateline NBC", ""), // already over
+                program("9", -600, "Dateline on ID", ""), // airing now
+                program("2", 3600, "Jeopardy!", "Dateline champions"),
+            ],
+        );
+        let got: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|r| (r.title.as_str(), r.channel.as_deref().unwrap()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("Dateline on ID", "Ch 9"),
+                ("Jeopardy!", "Ch 2"),
+                ("Dateline NBC", "Ch 5")
+            ]
+        );
+        assert!(matches!(
+            &rows[0].navigate_to,
+            SearchTarget::Guide(j) if j.channel == "9"
+        ));
+    }
+
+    #[test]
+    fn guide_match_type_picks_title_or_description() {
+        let guide = || vec![program("2", 3600, "Jeopardy!", "Dateline champions")];
+        assert!(search("dateline", SearchType::Title, guide()).is_empty());
+        assert_eq!(search("dateline", SearchType::Summary, guide()).len(), 1);
+    }
 }

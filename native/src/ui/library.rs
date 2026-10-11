@@ -266,6 +266,7 @@ pub fn show(
                 label
             };
             ui.horizontal(|ui| {
+                let bg = super::row_background(ui);
                 let row = ui.horizontal(|ui| {
                     super::thumb::show(
                         ui,
@@ -275,7 +276,8 @@ pub fn show(
                     );
                     super::selectable_truncated_label(ui, is_selected, &label);
                 });
-                let resp = super::row_click(ui, row.response.rect, ("library_video_row", &v.id));
+                let resp =
+                    super::row_click(ui, bg, row.response.rect, ("library_video_row", &v.id));
                 if resp.clicked() {
                     action.new_screen = Some(Screen::Library {
                         group_id: Some(gid.to_string()),

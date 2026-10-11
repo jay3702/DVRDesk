@@ -20,6 +20,19 @@ pub struct Player {
     api: &'static MpvApi,
     handle: MpvHandle,
     render_ctx: MpvRenderContext,
+    /// Registered as mpv's render update callback, so it must outlive
+    /// `render_ctx` — `Drop` frees the context before fields are dropped.
+    /// Double-boxed for a thin pointer to hand mpv as the callback ctx.
+    _on_frame: Box<OnFrame>,
+}
+
+type OnFrame = Box<dyn Fn() + Send + Sync>;
+
+/// mpv calls this from its own threads when a new frame is ready to render
+/// (or the display needs a redraw). It must not call back into mpv.
+unsafe extern "C" fn on_frame_trampoline(ctx: *mut c_void) {
+    let on_frame = &*(ctx as *const OnFrame);
+    on_frame();
 }
 
 // The mpv handle/render context are only ever touched from the UI thread in
@@ -32,9 +45,13 @@ impl Player {
     /// `log_file`: when set (diagnostics enabled), mpv writes its own verbose
     /// log there — decoder errors, the hwdec it actually picked, and frame
     /// timing, none of which surface anywhere else in the app.
+    ///
+    /// `on_frame`: called from an mpv thread whenever a new video frame is
+    /// ready — the caller requests a repaint from it.
     pub fn new(
         get_proc_address: &dyn Fn(&CStr) -> *const c_void,
         log_file: Option<&Path>,
+        on_frame: OnFrame,
     ) -> Result<Self, String> {
         let api = mpv_sys::library().map_err(|e| e.to_string())?;
         unsafe {
@@ -47,6 +64,9 @@ impl Player {
             set_option(api, handle, "hwdec", "auto-safe");
             set_option(api, handle, "keep-open", "yes");
             set_option(api, handle, "osc", "no");
+            // mpv's yt-dlp fallback for URLs it can't open: never useful for
+            // a DVR stream, and it spent ~2 s on each failed load first.
+            set_option(api, handle, "ytdl", "no");
             if let Some(path) = log_file {
                 set_option(api, handle, "log-file", &path.to_string_lossy());
             }
@@ -66,10 +86,18 @@ impl Player {
                 }
             };
 
+            let on_frame = Box::new(on_frame);
+            (api.render_context_set_update_callback)(
+                render_ctx,
+                Some(on_frame_trampoline),
+                &*on_frame as *const OnFrame as *mut c_void,
+            );
+
             Ok(Player {
                 api,
                 handle,
                 render_ctx,
+                _on_frame: on_frame,
             })
         }
     }
@@ -136,6 +164,53 @@ impl Player {
         unsafe { get_double(self.api, self.handle, "duration") }
     }
 
+    /// Display aspect ratio (width / height) of the current video, with any
+    /// non-square pixels already accounted for. `None` until mpv has
+    /// decoded enough to know it, or when there's no video track.
+    pub fn video_aspect(&self) -> Option<f32> {
+        unsafe {
+            let w = get_int64(self.api, self.handle, "dwidth")?;
+            let h = get_int64(self.api, self.handle, "dheight")?;
+            (w > 0 && h > 0).then(|| w as f32 / h as f32)
+        }
+    }
+
+    /// Drains mpv's event queue (nothing else reads it) and returns why the
+    /// current file failed to load or play, if it did — otherwise a failed
+    /// load just leaves a black player with no explanation.
+    pub fn take_load_error(&self) -> Option<String> {
+        let mut error = None;
+        unsafe {
+            loop {
+                let event = (self.api.wait_event)(self.handle, 0.0);
+                if event.is_null() || (*event).event_id == mpv_sys::MPV_EVENT_NONE {
+                    break;
+                }
+                if (*event).event_id == mpv_sys::MPV_EVENT_END_FILE && !(*event).data.is_null() {
+                    let end = &*((*event).data as *const mpv_sys::mpv_event_end_file);
+                    if end.reason == mpv_sys::MPV_END_FILE_REASON_ERROR {
+                        error = Some(mpv_error_string(self.api, end.error));
+                    }
+                }
+            }
+        }
+        error
+    }
+
+    /// The file or URL mpv considers current, exactly as passed to
+    /// `load_url`. Right after a `load_url` this is still the *previous*
+    /// file until mpv starts the new one — `position_secs`/`duration_secs`
+    /// meanwhile still describe the old file.
+    pub fn path(&self) -> Option<String> {
+        unsafe { get_string(self.api, self.handle, "path") }
+    }
+
+    /// Playback has reached the end of the file (with `keep-open`, mpv
+    /// stays on the last frame instead of unloading it).
+    pub fn eof_reached(&self) -> bool {
+        unsafe { get_flag(self.api, self.handle, "eof-reached").unwrap_or(false) }
+    }
+
     pub fn paused(&self) -> bool {
         unsafe { get_flag(self.api, self.handle, "pause").unwrap_or(false) }
     }
@@ -180,7 +255,12 @@ impl Player {
                 Err(_) => return false,
             };
             let flags = CString::new("video").unwrap();
-            let argv = [cmd.as_ptr(), file.as_ptr(), flags.as_ptr(), std::ptr::null()];
+            let argv = [
+                cmd.as_ptr(),
+                file.as_ptr(),
+                flags.as_ptr(),
+                std::ptr::null(),
+            ];
             (self.api.command)(self.handle, argv.as_ptr()) >= 0
         }
     }
@@ -216,10 +296,30 @@ impl Player {
         let alpha = (style.background_opacity.min(100) as u32 * 255 / 100) as u8;
         let boxed = alpha > 0;
         unsafe {
-            set_property_runtime(self.api, self.handle, "sub-font-size", &font_size.to_string());
-            set_property_runtime(self.api, self.handle, "sub-color", &format!("#{r:02X}{g:02X}{b:02X}"));
-            set_property_runtime(self.api, self.handle, "sub-back-color", &format!("#{alpha:02X}000000"));
-            set_property_runtime(self.api, self.handle, "sub-border-size", if boxed { "0" } else { "3" });
+            set_property_runtime(
+                self.api,
+                self.handle,
+                "sub-font-size",
+                &font_size.to_string(),
+            );
+            set_property_runtime(
+                self.api,
+                self.handle,
+                "sub-color",
+                &format!("#{r:02X}{g:02X}{b:02X}"),
+            );
+            set_property_runtime(
+                self.api,
+                self.handle,
+                "sub-back-color",
+                &format!("#{alpha:02X}000000"),
+            );
+            set_property_runtime(
+                self.api,
+                self.handle,
+                "sub-border-size",
+                if boxed { "0" } else { "3" },
+            );
             set_property_runtime(self.api, self.handle, "sub-shadow-offset", "0");
         }
     }
@@ -243,6 +343,9 @@ impl Player {
     /// call from inside an `egui::PaintCallback`.
     pub fn render(&self, gl: &egui_glow::glow::Context, width: i32, height: i32) {
         unsafe {
+            // mpv expects this after every update callback; rendering
+            // regardless of the returned flags keeps the existing behavior.
+            (self.api.render_context_update)(self.render_ctx);
             render::render_into_current_fbo(self.api, self.render_ctx, gl, width, height);
         }
     }

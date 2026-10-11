@@ -35,6 +35,8 @@ pub const MPV_EVENT_FILE_LOADED: c_int = 8;
 pub const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
 pub const MPV_EVENT_VIDEO_RECONFIG: c_int = 17;
 
+pub const MPV_END_FILE_REASON_ERROR: c_int = 4;
+
 pub const MPV_RENDER_PARAM_INVALID: c_int = 0;
 pub const MPV_RENDER_PARAM_API_TYPE: c_int = 1;
 pub const MPV_RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
@@ -50,6 +52,16 @@ pub struct mpv_event {
     pub error: c_int,
     pub reply_userdata: u64,
     pub data: *mut c_void,
+}
+
+/// Leading fields of mpv's `mpv_event_end_file` — the only ones read here.
+/// mpv owns the event memory, so never constructed or sized on this side.
+#[repr(C)]
+pub struct mpv_event_end_file {
+    pub reason: c_int,
+    /// An mpv error code, meaningful when `reason` is
+    /// `MPV_END_FILE_REASON_ERROR`.
+    pub error: c_int,
 }
 
 #[repr(C)]
@@ -130,6 +142,12 @@ pub struct MpvApi {
     pub render_context_render:
         unsafe extern "C" fn(MpvRenderContext, *mut mpv_render_param) -> c_int,
     pub render_context_report_swap: unsafe extern "C" fn(MpvRenderContext),
+    pub render_context_set_update_callback: unsafe extern "C" fn(
+        MpvRenderContext,
+        Option<unsafe extern "C" fn(*mut c_void)>,
+        *mut c_void,
+    ),
+    pub render_context_update: unsafe extern "C" fn(MpvRenderContext) -> u64,
     pub render_context_free: unsafe extern "C" fn(MpvRenderContext),
 
     // Kept alive for the lifetime of the process; symbols above borrow from it.
@@ -213,6 +231,8 @@ unsafe fn load() -> Result<MpvApi, String> {
         render_context_create: sym!("mpv_render_context_create"),
         render_context_render: sym!("mpv_render_context_render"),
         render_context_report_swap: sym!("mpv_render_context_report_swap"),
+        render_context_set_update_callback: sym!("mpv_render_context_set_update_callback"),
+        render_context_update: sym!("mpv_render_context_update"),
         render_context_free: sym!("mpv_render_context_free"),
         _library: lib,
     };

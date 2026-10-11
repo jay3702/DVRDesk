@@ -275,3 +275,32 @@ pub async fn resolve_hls_variant_url(
     }
     Err("HLS master playlist had no stream variants".to_string())
 }
+
+/// The DVR's full record for a recording file — what the Channels DVR
+/// admin page's "View Details" shows.
+pub async fn fetch_file_details(
+    server_url: &str,
+    recording_id: &str,
+) -> Result<serde_json::Value, String> {
+    let text = fetch_text(server_url, &format!("/dvr/files/{recording_id}")).await?;
+    serde_json::from_str(&text).map_err(|e| format!("Failed to parse file details: {e}"))
+}
+
+/// The DVR's recording log for a file — the admin page's "View Debug Log".
+/// Empty for some recordings, which the caller shows as such.
+pub async fn fetch_file_log(server_url: &str, recording_id: &str) -> Result<String, String> {
+    fetch_text(server_url, &format!("/dvr/files/{recording_id}/log")).await
+}
+
+async fn fetch_text(server_url: &str, path: &str) -> Result<String, String> {
+    let base = server_url.trim_end_matches('/');
+    let resp = reqwest::get(format!("{base}{path}"))
+        .await
+        .map_err(|e| format!("Network error reaching {base}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("API error {}: GET {path}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read GET {path}: {e}"))
+}

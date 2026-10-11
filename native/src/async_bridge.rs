@@ -27,6 +27,12 @@ pub enum Msg {
         recording: Box<crate::api::types::Recording>,
         result: Result<String, String>,
     },
+    /// Text for the recording details / debug log dialog.
+    FileInfoLoaded {
+        id: String,
+        kind: crate::ui::recording_detail::FileInfo,
+        result: Result<crate::ui::file_details::FileInfoBody, String>,
+    },
     PlaybackPersisted {
         id: String,
         position: f64,
@@ -88,6 +94,8 @@ pub enum Msg {
     /// See `ChannelsLoaded`'s doc comment — same stale-server guard.
     GuideLoaded {
         server_id: String,
+        /// The guide day it was fetched for (`LiveState::day`).
+        day: u32,
         result: Result<Vec<crate::api::guide::GuideProgram>, String>,
     },
     GuideJobsLoaded {

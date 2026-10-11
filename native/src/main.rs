@@ -10,6 +10,7 @@ mod async_bridge;
 mod channel_genres;
 mod deploy;
 mod downloads;
+mod file_check;
 mod log;
 mod migration;
 mod mpv_install;
@@ -46,6 +47,15 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
+        // With vsync, a Wayland buffer swap waits for the compositor's next
+        // frame callback, and GNOME stops sending those to a window that's
+        // hidden behind others. The main window's swap then blocks the
+        // whole event loop: a popped-out PIP window freezes (it's drawn
+        // inside the main window's frame) and GNOME reports the app as not
+        // responding. Without vsync swaps never wait; the player paces its
+        // repaints from mpv's new-frame callback instead (see
+        // `player_overlay::show`).
+        vsync: !ui::wayland_session(),
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 600.0])

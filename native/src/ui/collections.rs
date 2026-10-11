@@ -127,6 +127,7 @@ pub fn show(
     egui::ScrollArea::vertical().show(ui, |ui| {
         for s in shows {
             let label = format!("{} ({})", s.name, s.episode_count);
+            let bg = super::row_background(ui);
             let row = ui.horizontal(|ui| {
                 super::thumb::show(
                     ui,
@@ -137,7 +138,8 @@ pub fn show(
                 super::selectable_truncated_label(ui, false, &label);
             });
             let clicked =
-                super::row_click(ui, row.response.rect, ("collection_show_row", &s.id)).clicked();
+                super::row_click(ui, bg, row.response.rect, ("collection_show_row", &s.id))
+                    .clicked();
             if clicked {
                 action.new_screen = Some(Screen::TvShows {
                     show_id: Some(s.id.clone()),

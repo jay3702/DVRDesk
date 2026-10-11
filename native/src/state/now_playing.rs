@@ -28,4 +28,7 @@ pub struct NowPlaying {
     /// A live channel rather than a recording or library video — no
     /// playback speed control, since there's nothing ahead to speed into.
     pub live: bool,
+    /// The recording is too short to be real (`Recording::too_short`) —
+    /// added to the error shown when it then fails to play.
+    pub too_short: bool,
 }

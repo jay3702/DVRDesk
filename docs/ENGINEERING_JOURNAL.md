@@ -12,6 +12,159 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native (unreleased)
+
+### 2026-10-10 - Native: picture-in-picture player window
+
+- Request: undock the video into its own window that can be resized independently.
+- Solution:
+  - A Pop Out / Dock button in the player controls. Popped out, `player_overlay` renders into an egui immediate viewport: a separate always-on-top native window (default 640x420, min 240x135), and the main window goes back to normal browsing. The OS close button on the PIP window docks the video back rather than stopping it.
+  - No mpv changes were needed. eframe's glow backend uses one GL context with a surface per window, so the existing render context paints into the PIP window's framebuffer. mpv letterboxes to whatever shape the window is resized to.
+  - The overlay body (shortcuts, controls, scrubber, video, stats) was factored out of `show` so it draws identically docked or popped out. Input is per viewport, so while popped out the shortcuts only fire when the PIP window has focus; typing in the main window's search box doesn't trigger play/pause. The control row now wraps so a narrow PIP window doesn't clip buttons.
+  - PIP mode is kept for the session, so tuning another channel from the guide while popped out stays in the PIP window. Popping out of a fullscreen main window exits fullscreen first. If the backend reports no native multi-window support (`ViewportClass::Embedded`), it falls back to docked.
+- Symptom: the PIP window didn't stay on top on GNOME/Wayland. winit's Wayland `set_window_level` is an empty function, since Wayland has no protocol for an app to raise its own window, so the main window's "Keep window on top" setting never worked there either.
+- Decision: document the workaround instead of forcing the X11 backend (XWayland), which would bring X11's limits, such as blurrier fractional scaling, to every Linux user. On a Wayland session, the Pop Out tooltip and the Settings checkbox explain how to use GNOME's Alt+Space → Always on Top (`ui::always_on_top_hint`). The README notes it too.
+- Validation: builds with no warnings and tests pass. Not yet tried against real playback.
+- Symptom: on GNOME/Wayland, the PIP window froze whenever the main window lost focus, and GNOME reported the app as not responding.
+- Cause: the PIP window is drawn inside the main window's frame, which ends with the main window's `swap_buffers`. With vsync (swap interval 1), that swap waits for the compositor's next frame callback. GNOME stops sending those to a window hidden behind others, so the swap blocked the whole event loop, including GNOME's "are you alive" pings.
+- Solution: vsync is off on Wayland (`main.rs`), so swaps never wait. Repainting every frame would then spin a CPU core, so on Wayland the player's repaints come from mpv's render update callback (`mpv_render_context_set_update_callback`, registered in `Player::new`). It requests a repaint of the root viewport once per new video frame. The overlay adds a 250 ms repaint to keep the clock and control auto-hide ticking while paused. X11, Windows and macOS keep vsync and repainting every frame as before.
+- Validation: builds with no warnings; the app launches cleanly on GNOME/Wayland. Confirmed by the user: the PIP window keeps playing with the main window covered or minimized.
+- Request: keep the PIP window at the video's aspect ratio, so once the controls hide the window is exactly the picture.
+- Solution:
+  - In PIP mode the controls float over the top of the video on a translucent background instead of taking layout space above it, so showing or hiding them doesn't change the video's size. Docked mode is unchanged.
+  - winit has no aspect-ratio lock, so `snap_pip_to_aspect` corrects the size instead. The window takes the video's shape as soon as mpv knows it (`dwidth`/`dheight`, which already account for non-square pixels), and again whenever a video with a different shape starts. It doesn't snap while maximized or fullscreen. The default PIP size is now 640x360.
+- Symptom: the first version, which snapped once a resize had held still for 300 ms, never snapped on Wayland, leaving black bars. The user also wanted the shape held during the resize, not fixed afterwards.
+- Cause: it read the size from `viewport().inner_rect`, which needs the window position. winit's Wayland `inner_position` is NotSupported, so it was always `None` and the function returned early.
+- Solution: read the size from `ctx.screen_rect()`, and correct every user-driven size change on the next frame. During a drag the window manager sends sizes based on the drag's starting size plus the pointer's movement. So the edge being kept is found by comparing each such size with the window manager's previous one, not with our own corrected size; mpv's keep-aspect resizing on Wayland works the same way. A size equal to the one we last requested is our own correction landing and is ignored. Sizes more than 500 ms apart start a new drag, compared with the size before it.
+- Symptom: the per-frame correction worked, but the edges flickered while dragging.
+- Cause: a border resize is driven by the window manager. winit applies its size and eframe draws a frame at it before the app sees it, so every pointer move shows one wrong-shaped frame. winit has no hook that lets the app adjust a proposed size before it's drawn.
+- Solution: the PIP window has no decorations and resizes itself. Invisible 8 px grab zones on the right edge, bottom edge and bottom-right corner (`pip_resize_handles`) treat the pointer position as a suggested size, and `fit_aspect` sets the window to the nearest size with the video's shape: edge drags follow that edge, and corner drags take the closest point on the line of correctly shaped sizes. Only right and bottom, because growing from the left or top means moving the window too, which Wayland doesn't let an app do. Dragging the picture moves the window (`StartDrag`), and double-clicking toggles fullscreen. The per-frame correction stays for resizes the app doesn't drive, such as a keyboard resize from GNOME's window menu.
+- Validation: builds with no warnings. Confirmed working by the user on GNOME/Wayland.
+- Request: open the PIP window at the size the video had while docked.
+- Solution: the docked overlay records its video area each frame. When the PIP window opens, `pip_open_size` fits the video's shape inside that area, which drops mpv's letterbox bars and leaves the picture as it was shown. The result is held for the life of the window, because a changed builder size would make egui resize the window again. It falls back to 640x360 if nothing has been shown docked yet.
+- Validation: builds with no warnings. Not yet tried against real playback.
+
+### 2026-10-10 - Native: guide day picker (two weeks)
+
+- Request: like the admin page's Live TV view, show the guide a day at a time with a day dropdown: "Today", then weekday names, then weekday and date ("Saturday 10/17/2026").
+- Findings: the admin page pages the guide with `GET /devices/ANY/guide?time=<unix secs>`. The XMLTV form this app uses honours the same `time` parameter (checked with curl: each request returns 24 h of programs from `time`, plus those already in progress). HaleLeahi has guide data to about 15 days out.
+- Solution:
+  - A Day dropdown in the Live toolbar with 14 days (`GUIDE_DAYS`): Today, the weekday name for days 1–6, and weekday plus date for days 7–13, where a name alone would repeat. ◎ Now also returns to Today.
+  - Picking a day clears the guide; `ensure_live_loaded` refetches it with `time` set to that day's local midnight (`day_start`; today still fetches from now). `Msg::GuideLoaded` carries its day, and a response for a day that's no longer selected is dropped.
+  - Later days open at midnight instead of now: `focus` replaces now for the initial scroll, the origin-shift anchor, the timeline bounds and the placeholder blocks. Guide history merges only into today, since on a later day it would stretch the timeline back across the days in between.
+- Follow-up: a later day could be scrolled back into the previous evening. The cause: a `time=` fetch also returns programs already in progress at that time, starting up to about 3.3 h earlier, and the timeline began at the earliest start. A later day's timeline now begins at its midnight, and programs in progress then are drawn from the left edge (`x0` is already clamped to the timeline start, so their titles stay visible). Today is unchanged and still merges guide history.
+- Decided against keeping every fetched day and showing them as one timeline: the guide's program index is rebuilt every frame, and each row's programs are copied as it draws, so two weeks (about 60,000 programs on HaleLeahi) would cost about 14 times one day's work per frame. Worth revisiting only after that's cached between frames.
+- Validation: builds with no warnings and tests pass, with new tests for the day labels and midnight start. Not yet tried in the running app.
+
+### 2026-10-10 - Native: guide timeline reaches the end of the loaded data
+
+- Symptom: a Search jump landed at the guide's right edge with only a sliver of the program showing; the guide wouldn't scroll further.
+- Cause: the timeline ended at now + `GUIDE_DURATION_SECS` (24 h). The XMLTV fetch returns every program that starts inside its window, and long ones end after it: on HaleLeahi, 155 of 4,272 programs ended past the window, the latest by 8.9 h. Their cells were cut off at the edge of the scroll range.
+- Solution: the timeline runs to the latest `stop` among the loaded programs, and never ends earlier than the 24 h window. The ruler ticks and the placeholder blocks for channels without guide data use the same end point, so they extend with it.
+- Validation: the overrun was measured against the DVR's XMLTV feed with the app's fetch parameters. Builds with no warnings and tests pass. Not yet tried in the running app.
+
+### 2026-10-10 - Native: Search finds guide airings and opens the guide on them
+
+- Request: include guide matches in Search results; clicking one should open the guide at that program.
+- Solution:
+  - Search adds "On TV" rows from the Live screen's own channels and guide data (`LiveState`), which Search now loads too. Matching follows the search type: Title and Series Name use the program title, Summary its description, Any either. Only programs airing now or later are included, the same rule the guide's own search uses. Rows show the channel ("Ch 5 KHNL") under the type and the air time in the date column, soonest first, after the library results. An "Include TV Guide" checkbox turns them off, and a spinner shows while the guide is still loading.
+  - Clicking one sets `LiveState::jump_to` and opens Live. Once channels and the guide are loaded, the jump becomes a one-hit guide search (`SearchMatch::Program`), reusing that path's row and time scrolling and yellow highlight; the toolbar search box shows the title. It clears category and source filters first so the channel's row exists, and sets `scrolled_to_now` so the first "Now" positioning doesn't pull the view back. A channel that's hidden shows the guide's "No match".
+  - Search's result targets became `SearchTarget::{Screen, Guide}`.
+- Validation: builds with no warnings and tests pass, with new tests for guide matching (current/future only, soonest first, title vs description). The guide jump itself is UI code without a test and hasn't been tried in the running app.
+
+### 2026-10-10 - Native: recordings only seconds long are flagged and explained
+
+- Symptom: neither episode of The Whole Story With Anderson Cooper would play, with no error, although both files are on disk.
+- Cause: each file is about 9 MB and 1.3 s long, from an hour-long recording job (`JobDuration 3660`). Signal stats were clean all hour (1,826 good samples, about 4.6 Mbps), so the stream reached the DVR but almost none of it was written. Three Arena With Kasie Hunt recordings are the same; all five are from channel 51 on one tuner, July 26 to August 14, 2026. mpv read the 1.3 s, never decoded a frame ("non-existing PPS"), reached the end and stopped. With `keep-open` that isn't an error, so nothing was reported.
+- Solution:
+  - `Recording::zero_length` became `too_short`: completed and under 60 s (`MIN_RECORDING_SECS`), since no real program is that short. The library API reports the length but not the scheduled length, so a fixed threshold rather than a percentage. The Corrupt badge, the detail page warning ("The DVR only saved 1.3 seconds…"), the Details status, the scan summary's "too short to play" count and its Select these all use it.
+  - Playback: if a non-live recording under 60 s reaches its end (`eof-reached`), the player closes and the error banner says how many seconds the DVR saved.
+- Validation: builds with no warnings and tests pass, with new tests for the 60 s rule and the Details status. Not yet tried in the running app.
+
+### 2026-10-10 - Native: episode multi-select, bulk actions and a live file scan
+
+- Request: clean up the library. Multi-select in the episode views, mark many watched or unwatched, trash many. To support that, show the broken recordings (missing from disk, and empty) in the lists, using a scan that updates the cards as it goes.
+- Solution:
+  - File scan: while a show's episode grid is open, every completed episode is checked through `FileChecks` (cached for 5 minutes). A tokio semaphore now caps checks at 4 in flight, because a show can have hundreds of episodes and the DVR is also serving live TV (tokio's `sync` feature added for it). Cards get "File missing" / "Empty file" badges as results land. A status line shows progress, then "N missing from disk, M empty or 0 length" with a **Select these** button.
+  - Multi-select (TV Shows episode grid): a checkbox on each card (shown on hover, and on every card once any is checked), Ctrl/⌘-click to toggle, Shift-click for a range in grid order. While anything is selected, a plain click toggles instead of opening the episode, and double-click doesn't play. Esc or Clear ends it. The selection belongs to one show, drops trashed episodes, and keeps only what's visible, so marking episodes watched under the Unwatched filter deselects them.
+  - Bulk actions: Select all, Mark Watched, Mark Unwatched, and Trash… with a confirmation listing the episodes. Each runs in one background task that sends requests one at a time instead of all at once, and every result goes through the existing per-item handling (`Msg::WatchedToggled`, `Msg::Trashed`), so cards update or disappear one by one. Watched changes are applied to the lists immediately, as with a single toggle.
+  - Failed trash and watched changes, which were only printed to stderr, now show in the error banner (the playback error banner, generalized and renamed `error_notice`) and go to `dvrdesk.log`.
+- Validation: builds with no warnings and tests pass, including new tests for toggle and Shift-range selection. Not yet tried in the running app; bulk trash in particular hasn't been run against the DVR.
+
+### 2026-10-10 - Native: badges wrap onto more lines
+
+- Request: when an episode has more badges than fit on one line, wrap them to the next.
+- Cause: the badge rows were already `horizontal_wrapped`, but each badge was an `egui::Frame` around a label. A Frame lays out a child UI at the cursor on the current line (`available_rect_before_wrap`), so it never moves to the next line. A headless test showed the old badges staying on one line past a card's 184-point width, with the last ones squeezed into narrow columns and their text broken onto many short lines.
+- Solution: `ui::badge` measures the text and reserves the badge's exact size with `allocate_exact_size`, which does wrap, then paints the pill and text itself. Episode/movie cards and the recording detail page both use it, with their existing sizes and padding.
+- Validation: builds with no warnings and tests pass, including a new test that lays out eight badges at card width and checks they fit and use more than one line. Cards in the same grid row can now differ in height when one has more badge lines.
+
+### 2026-10-10 - Native: mouseover highlighting in every list
+
+- Request: highlight list rows on mouseover, in all lists.
+- Findings: text-only rows (Collections, Library groups, the sidebar) already highlighted through `selectable_truncated_label`, and so did the Live guide's program blocks. Rows with a thumbnail didn't: `row_click` registers a click area over the whole row after the label, so the label is never the hovered widget and its own highlight never shows. That covered Recent, TV Shows' show list, Downloads, Collections' shows and Library videos. The Search table and the episode/movie card grids had no hover feedback at all.
+- Solution:
+  - Thumbnail rows: `row_background` reserves a paint slot (`Shape::Noop`) before the row is drawn, and `row_click` fills it with the hovered-widget color when the row is hovered, so the highlight sits behind the thumbnail and text.
+  - Search: the table's cells sense clicks, which turns on egui_extras' own hovered-row fill (it only paints it for interactive cells). A click anywhere on a row now opens the result, as its title button does.
+  - Cards: the fill switches to the hovered color, using last frame's hover state (it's only known after the card is drawn) plus a repaint when it changes, so it doesn't wait for the next mouse move. Pointer position is used rather than the card's response, so the card stays lit over its download icon.
+- Validation: builds with no warnings and tests pass. Not yet tried in the running app.
+
+### 2026-10-10 - Native: detail page checks whether the DVR has the file
+
+- Finding: on the user's DVR, every recording made before July 3, 2026 (446 of 599, all with Windows-style `TV\...` paths) returns 404 from `stream.mpg`, apparently since the DVR moved to Linux storage (`/srv/dvr`). So do 31 Rachel Maddow Show recordings with Linux-style paths. Most have normal durations, so nothing in their metadata (and so not the Corrupt badge) shows the problem until Play fails. The DVR's `Path` is present for all of them; a path says nothing about whether the file exists.
+- Solution: `file_check::FileChecks` asks the DVR for the first byte of a completed recording's `stream.mpg` when its detail page is shown. 404 means missing; a success with `Content-Length: 0` means empty. The result is cached for 5 minutes. The detail page then shows a "File missing" or "Empty file" badge and one warning line saying what's wrong, which takes precedence over the general 0-length warning. A check that fails (network error, unexpected status) shows nothing. The playback error banner uses a cached result for its hint. Checking every row of a list was rejected as too slow.
+- Validation: builds with no warnings and tests pass. The three responses were confirmed with curl against the DVR (404, 200 with `Content-Length: 0`, 206). Not yet tried in the running app.
+- Note: running `rustfmt` on `main.rs` formats every module, and this crate isn't rustfmt-clean, so it reformatted files with no changes in them. That churn was reverted. Format individual files only.
+
+### 2026-10-10 - Native: recording Details / Debug Log, and a Corrupt flag
+
+- Request: bring the Channels DVR admin page's "View Details" and "View Debug Log" into the recording detail page as buttons that open a scrollable dialog. Keep unplayable 0-length recordings in the lists, but flag them as corrupt.
+- Findings:
+  - The admin bundle (`/bundle.js`) links "View Debug Log" to `/dvr/files/{ID}/log` (plain text, hidden there for imported files). "View Details" shows the file's record, `/dvr/files/{ID}`, in a JSON viewer.
+  - The admin UI shows the DVR's `Corrupted` flag as "Interrupted" ("Recording was interupted"), which this app already did. So the new flag needed a different signal.
+  - On this DVR, 10 completed recordings have no `duration`. Three (Dateline) serve a 0-byte `stream.mpg` and are `Corrupted`. Seven are missing from disk (`stream.mpg` 404s) and aren't flagged at all. The DVR reports `Duration: 0` for all of them, so that's the signal.
+- Solution:
+  - `Recording::zero_length()` (completed, duration 0) shows a "Corrupt" badge on cards and the detail page next to the existing flags, plus a warning line on the detail page. The playback error banner's hint uses it as well, replacing the earlier `corrupted`-based hint.
+  - Details and Debug Log buttons on the detail page (Recent, TV Shows, Movies) open one resizable dialog with the DVR's text in a selectable monospace view, plus Copy. An empty log says so, and HTTP errors are shown.
+  - Details is rendered rather than shown as JSON (`ui/file_details.rs`), in sections: Recording (status, file size, length, scheduled vs. recorded times, IDs), Program, Signal and buffer quality (a table with initial/last/min/max/average and good/bad counts; average is Sum/GoodCount, bitrate in Mbps, non-zero bad counts in red), and Commercials (the detected regions). Raw JSON, which still has everything including the guide feed's `Airing.Raw`, is collapsed at the bottom, and Copy JSON copies it. It's read from `serde_json::Value` instead of a typed struct, because broken recordings leave out `FileSize` and `SignalStats` and a missing field should just skip its row. Timestamps mix Unix seconds and milliseconds, so values above 1e11 are treated as milliseconds. A response for a dialog that's since been closed or switched is dropped.
+- Validation: builds with no warnings and tests pass, including new tests that render a full record, a sparse broken one and an empty one in a headless egui pass. Endpoint responses checked with curl for a normal recording (log text), an empty one (empty log) and a missing one (404). Not yet tried in the running app.
+
+### 2026-10-10 - Native: failed playback shows an error instead of nothing
+
+- Symptom: Dateline S6E32 "The Call" didn't start when played from TV Shows, and no error appeared.
+- Cause: the recording is empty on the DVR. `/dvr/files/46269` reports `Corrupted: true` and `Duration: 0`, `stream.mpg` answers 200 with `Content-Length: 0`, and the HLS master returns 500. mpv logged `0 bytes read` and "Failed to recognize file format", but the app never read mpv's events, so a failed load left a black player. A failed HLS lookup for an in-progress recording was only printed to stderr.
+- Solution:
+  - `Player::take_load_error` drains mpv's event queue each frame and reports an `END_FILE` with reason error. The app then closes the player and shows a dismissible error banner with mpv's reason, adding "The DVR marked this recording as corrupted" when it is. A failed HLS lookup uses the same banner. Both are also written to `dvrdesk.log`.
+  - The recording detail page warns when the DVR has marked a recording corrupted. It's only a warning, since corrupted recordings often still play with glitches.
+  - `stop_playback` only saves a position once mpv is on the new file, so a failed load or an immediate close doesn't save 0 or the previous file's position.
+  - mpv's `ytdl` fallback is off. It ran yt-dlp for about 2 s on every failed load, which is never useful for a DVR stream.
+- Validation: builds with no warnings and tests pass. Not yet tried in the running app.
+
+### 2026-10-10 - Native: per-video player state resets between videos
+
+- Request: after closing a popped-out video, the next video also opened popped out. The user decided per-video state should reset between views.
+- Solution: `stop_playback` (Close, Esc, switching servers) resets `player_pip`, so the next video starts docked. Starting another video without closing, such as tuning a channel from the guide while popped out, still stays in the PIP window. Docking also clears the PIP window's sizing state, so a later pop-out starts fresh.
+- Playback speed now resets to 1x for every new video (`start_now_playing`), instead of being kept for the session as in v2.2.0. The user's reasoning: speed is usually tied to specific content.
+- Validation: builds with no warnings.
+
+### 2026-10-10 - Native: playback hang at start; wrong resume and saved positions
+
+- Symptom: playing Dateline S8E7 from TV Shows hung the app. After a restart it played fine, and it couldn't be reproduced. The episode's detail page also showed a different image from its card.
+- Causes:
+  - Hang: a deadlock introduced earlier the same day by the mpv new-frame callback. The callback called `request_repaint_of`, which takes egui's exclusive context lock, from mpv's threads. Every frame, the player overlay read mpv's position and duration inside `ctx.input`, which holds that lock (egui 0.29 `context.rs:899`). When a file starts, mpv's core waits on its video thread; if that thread was in the callback waiting for the lock while the UI thread held it waiting on the core, everything stopped. It only hits when the callback fires inside that window, so it's intermittent.
+  - Resume and saved positions: the playback ticks ran on the frame Play was pressed, when mpv still reports the previous file. mpv's log shows the new recording's resume seek sent in the same millisecond as `loadfile` and rejected (`time-pos="5.808" -> -1`), with resume then marked done, so the episode started from the beginning. The same window could PUT the previous file's position onto the new recording, or mark it watched if the previous one was past 90%. S8E7's saved position on the DVR was 28 s, close to where the previous file stopped.
+  - Image: by design. Cards prefer the DVR's own screenshot (`thumbnail_url`); the detail page prefers guide artwork (`image_url`), which for Dateline is one show-wide image.
+- Solution:
+  - The overlay only reads which keys were pressed inside `ctx.input`, and calls mpv after the lock is released.
+  - The frame callback (`repaint_notifier` in `app.rs`) only flags a helper thread, which makes the `request_repaint_of` call. mpv's threads never wait on egui's lock, so a future mpv call made under that lock can't bring the deadlock back.
+  - Resume, progress saving, commercial skip and caption selection all wait until mpv's `path` matches the URL last loaded (`App::player_on_current_file`).
+- Validation: builds with no warnings and tests pass. The deadlock can't be triggered on demand, so the fix is reasoned from the code and egui's source, not seen to stop a reproduced hang.
+
+### 2026-10-10 - Native: dark mode background is dark gray
+
+- Symptom: black channel logos such as CBS were invisible in dark mode wherever they're drawn straight onto the background, for example in the Recent Recordings list. Most logos are transparent PNGs, and the old app's background was a near-black navy (#12121e). The Live guide already drew a gray(51) plate behind logos, so they showed up there.
+- Solution: the dark theme's backgrounds in `theme.rs` are neutral grays. The panel is #333333 (the same gray as the guide's logo plate), dialogs and popups are a step lighter (#3b3b3b), text inputs a step darker (#262626), with borders and buttons adjusted to match. Text colors and the blue accent and selection colors are unchanged.
+- Validation: builds with no warnings. Not yet looked at in the running app.
+
 ## Native v2.2.0
 
 ### 2026-09-29 - Native: Windows ARM64 and Linux AppImage releases

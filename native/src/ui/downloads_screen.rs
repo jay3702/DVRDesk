@@ -55,6 +55,7 @@ pub fn show(ui: &mut egui::Ui, server_url: &str, downloads: &Downloads) -> Downl
                     // `ui.interact()` wins any overlap) — this sidesteps that
                     // by never overlapping them in the first place, the same
                     // structure `library.rs`'s row+play-button already uses.
+                    let bg = super::row_background(ui);
                     let row = ui.horizontal(|ui| {
                         super::thumb::show(
                             ui,
@@ -127,7 +128,8 @@ pub fn show(ui: &mut egui::Ui, server_url: &str, downloads: &Downloads) -> Downl
                     });
 
                     if is_done {
-                        let resp = super::row_click(ui, row.response.rect, ("download_row", id));
+                        let resp =
+                            super::row_click(ui, bg, row.response.rect, ("download_row", id));
                         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                         if resp.double_clicked() {
                             action.play = Some(id.clone());

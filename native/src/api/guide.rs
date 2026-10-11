@@ -47,12 +47,22 @@ pub struct GuideProgram {
 /// ~0.2s over LAN either way) and that this is the same endpoint the admin
 /// UI's own "Copy EPG URL" feature uses, just with a shorter window — a
 /// real, stable, intended path, not an internal implementation detail.
+///
+/// `start`: Unix seconds to begin from instead of now — how the admin
+/// page's Live TV view pages through the guide one day at a time (it sends
+/// the same `time` parameter to the JSON guide; XMLTV honours it too,
+/// confirmed with curl). The response also includes programs already in
+/// progress at `start`.
 pub async fn fetch_guide(
     server_url: &str,
     duration_secs: u32,
+    start: Option<i64>,
 ) -> Result<Vec<GuideProgram>, String> {
     let base = server_url.trim_end_matches('/');
-    let url = format!("{base}/devices/ANY/guide/xmltv?duration={duration_secs}");
+    let mut url = format!("{base}/devices/ANY/guide/xmltv?duration={duration_secs}");
+    if let Some(start) = start {
+        url.push_str(&format!("&time={start}"));
+    }
 
     let resp = reqwest::get(&url)
         .await

@@ -25,6 +25,37 @@ pub const HISTORY_LOOKBACK_SECS: i64 = 86_400;
 /// complexity; a manual Refresh re-fetches from "now" if it goes stale.
 pub const GUIDE_DURATION_SECS: u32 = 86_400;
 
+/// Days offered by the guide's day picker: today plus the next 13, the two
+/// weeks of guide data a Channels DVR keeps (the admin page's Live TV view
+/// offers the same range).
+pub const GUIDE_DAYS: u32 = 14;
+
+/// Local midnight at the start of `day` days from today, in Unix seconds;
+/// `None` for today itself, whose guide is fetched from now.
+pub fn day_start(day: u32) -> Option<i64> {
+    use chrono::TimeZone as _;
+    if day == 0 {
+        return None;
+    }
+    let date = chrono::Local::now().date_naive() + chrono::Duration::days(day as i64);
+    chrono::Local
+        .from_local_datetime(&date.and_hms_opt(0, 0, 0)?)
+        .earliest()
+        .map(|t| t.timestamp())
+}
+
+/// "Today", then the weekday for the rest of this week, then weekday and
+/// date for the week after ("Saturday 10/17/2026"), where a name alone
+/// would repeat.
+pub fn day_label(day: u32) -> String {
+    let date = chrono::Local::now().date_naive() + chrono::Duration::days(day as i64);
+    match day {
+        0 => "Today".to_string(),
+        1..=6 => date.format("%A").to_string(),
+        _ => date.format("%A %-m/%-d/%Y").to_string(),
+    }
+}
+
 const PIXELS_PER_MIN: f32 = 4.0;
 const ROW_HEIGHT: f32 = 56.0;
 const CHANNEL_COL_WIDTH: f32 = 190.0;
@@ -140,6 +171,15 @@ pub enum SearchMatch {
     },
 }
 
+/// A request (from Search) to open the guide at one airing: scrolled to its
+/// channel and start time, and highlighted like a guide search match.
+#[derive(Debug, Clone)]
+pub struct GuideJump {
+    pub channel: String,
+    pub start: i64,
+    pub title: String,
+}
+
 /// Highlight color for the currently-selected search match — distinct from
 /// the blue "current program" tint, the gray hover blend, and the red
 /// recording indicators, so a jumped-to cell is unambiguous at a glance.
@@ -215,6 +255,11 @@ pub struct LiveState {
     /// jumping the grid away from "now" just after first display. Tracking
     /// both lets the next frame shift the offset by the same amount.
     pub timeline_anchor: Option<(i64, f32)>,
+    /// Set by Search; applied once channels and the guide have loaded.
+    pub jump_to: Option<GuideJump>,
+    /// Which day the guide shows: 0 is today, up to `GUIDE_DAYS - 1`.
+    /// Changing it clears `guide` so the app fetches that day.
+    pub day: u32,
 }
 
 impl Default for LiveState {
@@ -241,6 +286,8 @@ impl Default for LiveState {
             play_choice: None,
             scrolled_to_now: false,
             timeline_anchor: None,
+            jump_to: None,
+            day: 0,
         }
     }
 }
@@ -600,9 +647,28 @@ pub fn show(
             });
 
         ui.separator();
+        let mut day = state.day;
+        egui::ComboBox::from_id_salt("live_guide_day")
+            .selected_text(day_label(day))
+            .show_ui(ui, |ui| {
+                for d in 0..GUIDE_DAYS {
+                    ui.selectable_value(&mut day, d, day_label(d));
+                }
+            });
         if ui.button("◎ Now").clicked() {
+            day = 0;
             state.scrolled_to_now = false;
             state.pending_scroll_y = Some(0.0);
+        }
+        if day != state.day {
+            state.day = day;
+            // Refetched for the new day by the app; the timeline then opens
+            // at that day's start (or "now", for today).
+            state.guide = Loaded::Idle;
+            state.scrolled_to_now = false;
+            state.timeline_anchor = None;
+            state.search_matches.clear();
+            state.search_no_match = false;
         }
 
         ui.separator();
@@ -663,6 +729,15 @@ pub fn show(
     ui.separator();
 
     let now = chrono::Utc::now().timestamp();
+    // Where the timeline opens: now for today, midnight for a later day.
+    let focus = day_start(state.day).unwrap_or(now);
+
+    // A jump from Search must land on the channel's row, so clear any
+    // category or source filter that could hide it.
+    if state.jump_to.is_some() {
+        state.category_filter = LiveCategory::All;
+        state.source_filter = None;
+    }
 
     let filtered: Vec<&Channel> = unhidden
         .iter()
@@ -789,8 +864,11 @@ pub fn show(
         Loaded::Ready(g) => g,
         _ => &[],
     };
+    // Guide history covers the past, so it only belongs on today's
+    // timeline — merged into a later day it would stretch the grid back
+    // across every day in between.
     let history: &[GuideProgram] = match &state.history {
-        Loaded::Ready(h) => h,
+        Loaded::Ready(h) if state.day == 0 => h,
         _ => &[],
     };
 
@@ -806,8 +884,30 @@ pub fn show(
         merged.insert((p.channel.as_str(), p.start), p);
     }
 
-    let origin = merged.values().map(|p| p.start).min().unwrap_or(now);
-    let window_end = now + GUIDE_DURATION_SECS as i64;
+    // A later day starts at its own midnight. Its fetch also returns the
+    // programs already in progress then (up to a few hours earlier), which
+    // would otherwise let the timeline scroll back into the previous
+    // evening. They start at the left edge instead (`x0` below is clamped
+    // to the timeline's start), title included. Each later
+    // day is fetched on its own rather than all being kept: the index below
+    // is rebuilt every frame, so two weeks of programs would cost about
+    // 14 times as much per frame as one day.
+    let origin = if state.day > 0 {
+        focus
+    } else {
+        merged.values().map(|p| p.start).min().unwrap_or(focus)
+    };
+    // Out to the last loaded program's end, not just the fetch window: the
+    // guide returns every program that *starts* within its window, and
+    // long ones run past it (by nearly 9 hours on a real DVR). Ending the
+    // timeline at the window cut those cells off, and a search jump to one
+    // landed at the very edge of the scroll range.
+    let window_end = merged
+        .values()
+        .map(|p| p.stop)
+        .max()
+        .unwrap_or(focus)
+        .max(focus + GUIDE_DURATION_SECS as i64);
 
     let mut programs_by_channel: HashMap<&str, Vec<&GuideProgram>> = HashMap::new();
     for p in merged.values() {
@@ -856,7 +956,7 @@ pub fn show(
             // the new origin. Otherwise the user has scrolled: keep their
             // time in view.
             let prev_now_x =
-                ((hour_align(now) - prev_origin) as f32 / 60.0 * PIXELS_PER_MIN).max(0.0);
+                ((hour_align(focus) - prev_origin) as f32 / 60.0 * PIXELS_PER_MIN).max(0.0);
             if (prev_offset_x - prev_now_x).abs() < 1.0 {
                 state.scrolled_to_now = false;
             } else {
@@ -906,6 +1006,32 @@ pub fn show(
         }
     }
 
+    // A jump from Search becomes a one-hit guide search for that airing, so
+    // it scrolls and highlights exactly as a guide search match does. Waits
+    // for the rows and the guide; `scrolled_to_now` is set so the first
+    // "Now" positioning doesn't override it on the next frame.
+    let mut jumped = false;
+    if !rows.is_empty() && matches!(state.guide, Loaded::Ready(_)) {
+        if let Some(jump) = state.jump_to.take() {
+            state.search = jump.title.clone();
+            state.search_matches.clear();
+            state.search_match_idx = 0;
+            match rows.iter().position(|c| c.number == jump.channel) {
+                Some(row_idx) => {
+                    state.search_matches.push(SearchMatch::Program {
+                        row_idx,
+                        channel: jump.channel,
+                        start: jump.start,
+                    });
+                    state.search_no_match = false;
+                    state.scrolled_to_now = true;
+                    jumped = true;
+                }
+                None => state.search_no_match = true,
+            }
+        }
+    }
+
     if (search_next || search_prev) && !state.search_matches.is_empty() {
         let len = state.search_matches.len();
         state.search_match_idx = if search_next {
@@ -915,7 +1041,7 @@ pub fn show(
         };
     }
 
-    if search_submitted || search_next || search_prev {
+    if search_submitted || search_next || search_prev || jumped {
         if let Some(m) = state.search_matches.get(state.search_match_idx).cloned() {
             match m {
                 SearchMatch::Channel { row_idx } => {
@@ -1131,7 +1257,7 @@ pub fn show(
                 if let Some(x) = state.pending_scroll_x.take() {
                     timeline_scroll = timeline_scroll.scroll_offset(egui::vec2(x, 0.0));
                 } else if !state.scrolled_to_now {
-                    let target_x = x_for_time(hour_align(now)).max(0.0);
+                    let target_x = x_for_time(hour_align(focus)).max(0.0);
                     timeline_scroll = timeline_scroll.scroll_offset(egui::vec2(target_x, 0.0));
                     state.scrolled_to_now = true;
                 }
@@ -1162,7 +1288,7 @@ pub fn show(
                             // data of its own shouldn't grow a full day of
                             // fake past placeholder blocks implying history
                             // that was never actually captured.
-                            _ => synthetic_blocks(chan, now, window_end - now),
+                            _ => synthetic_blocks(chan, focus, window_end - focus),
                         };
 
                         for (prog_idx, prog) in programs.iter().enumerate() {
@@ -1549,4 +1675,42 @@ pub fn show(
     }
 
     action
+}
+
+#[cfg(test)]
+mod day_tests {
+    use super::*;
+    use chrono::{Datelike as _, TimeZone as _, Timelike as _};
+
+    #[test]
+    fn day_labels_name_this_week_and_date_the_next() {
+        let today = chrono::Local::now().date_naive();
+        assert_eq!(day_label(0), "Today");
+        let tomorrow = today + chrono::Duration::days(1);
+        assert_eq!(day_label(1), tomorrow.format("%A").to_string());
+        let in_a_week = today + chrono::Duration::days(7);
+        assert_eq!(
+            day_label(7),
+            format!(
+                "{} {}/{}/{}",
+                in_a_week.format("%A"),
+                in_a_week.month(),
+                in_a_week.day(),
+                in_a_week.year()
+            )
+        );
+    }
+
+    #[test]
+    fn later_days_start_at_local_midnight() {
+        assert_eq!(day_start(0), None);
+        let start = chrono::Local
+            .timestamp_opt(day_start(3).unwrap(), 0)
+            .unwrap();
+        assert_eq!(
+            start.date_naive(),
+            chrono::Local::now().date_naive() + chrono::Duration::days(3)
+        );
+        assert_eq!((start.hour(), start.minute()), (0, 0));
+    }
 }

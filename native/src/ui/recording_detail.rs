@@ -15,8 +15,27 @@ use chrono::{Local, TimeZone};
 
 use crate::api::types::Recording;
 
+/// The two recording-file views carried over from the Channels DVR admin
+/// page, each opened in a scrollable dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileInfo {
+    Details,
+    DebugLog,
+}
+
+impl FileInfo {
+    pub fn label(self) -> &'static str {
+        match self {
+            FileInfo::Details => "Details",
+            FileInfo::DebugLog => "Debug Log",
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct RecordingDetailAction {
+    /// `Some` the frame Details or Debug Log is clicked.
+    pub file_info: Option<FileInfo>,
     pub play: bool,
     /// `Some(new_value)` the frame Mark Watched/Unwatched is clicked.
     pub toggle_watched: Option<bool>,
@@ -51,20 +70,22 @@ fn fmt_duration(total_secs: f64) -> String {
 }
 
 fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
-    egui::Frame::default()
-        .fill(color)
-        .inner_margin(egui::Margin::symmetric(6.0, 2.0))
-        .rounding(4.0)
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .small()
-                    .color(egui::Color32::WHITE),
-            );
-        });
+    super::badge(
+        ui,
+        egui::RichText::new(text).small(),
+        color,
+        egui::vec2(6.0, 2.0),
+    );
 }
 
-pub fn show(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> RecordingDetailAction {
+/// `file_checks`: whether the DVR can serve this recording's file, checked
+/// when the page is shown — see `crate::file_check`.
+pub fn show(
+    ui: &mut egui::Ui,
+    rec: &Recording,
+    server_url: &str,
+    file_checks: &crate::file_check::FileChecks,
+) -> RecordingDetailAction {
     // Left margin matters here, not just cosmetics: every caller renders
     // this immediately to the right of a resizable `SidePanel`, in the
     // panel's *sibling* space rather than inside the panel itself. egui
@@ -88,14 +109,26 @@ pub fn show(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> RecordingDe
             // site.
             egui::ScrollArea::vertical()
                 .id_salt("recording_detail_scroll")
-                .show(ui, |ui| show_inner(ui, rec, server_url))
+                .show(ui, |ui| show_inner(ui, rec, server_url, file_checks))
                 .inner
         })
         .inner
 }
 
-fn show_inner(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> RecordingDetailAction {
+fn show_inner(
+    ui: &mut egui::Ui,
+    rec: &Recording,
+    server_url: &str,
+    file_checks: &crate::file_check::FileChecks,
+) -> RecordingDetailAction {
+    use crate::file_check::FileStatus;
+
     let mut action = RecordingDetailAction::default();
+    // Only a completed recording has a finished file to check; one still
+    // recording is played through HLS instead.
+    let file_status = rec
+        .completed
+        .then(|| file_checks.status(server_url, &rec.id));
 
     // `image_url` (real production/promotional artwork from the Gracenote/
     // TMS guide feed) is preferred over `thumbnail_url` (a screenshot the
@@ -197,6 +230,36 @@ fn show_inner(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> Recording
     }
     ui.add_space(4.0);
 
+    // One explanation, most specific first: the file check says what's
+    // actually wrong; the 0-length report only that something is.
+    let warning = match file_status {
+        Some(FileStatus::Missing) => Some(
+            "The DVR lists this recording, but its file isn't on the DVR's disk \
+             (the DVR answers \"404 not found\"), so it can't be played."
+                .to_string(),
+        ),
+        Some(FileStatus::Empty) => Some(
+            "The DVR's file for this recording is empty (0 bytes), so there's nothing to \
+             play. Debug Log may show why."
+                .to_string(),
+        ),
+        _ if rec.too_short() => Some(if rec.duration > 0.0 {
+            format!(
+                "The DVR only saved {:.1} seconds of this recording, so there's almost \
+                 nothing to play. Debug Log may show why.",
+                rec.duration
+            )
+        } else {
+            "The DVR reports this recording as 0 length, so there's nothing to play. \
+             Debug Log may show why."
+                .to_string()
+        }),
+        _ => None,
+    };
+    if let Some(warning) = warning {
+        ui.label(egui::RichText::new(warning).color(ui.visuals().warn_fg_color));
+    }
+
     if let Some(ep_title) = &rec.episode_title {
         let prefix = match (rec.season_number, rec.episode_number) {
             (Some(s), Some(e)) => format!("S{s}E{e} — "),
@@ -228,6 +291,18 @@ fn show_inner(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> Recording
         }
         if rec.corrupted {
             badge(ui, "Interrupted", egui::Color32::from_rgb(150, 40, 40));
+        }
+        if rec.too_short() {
+            badge(ui, "Corrupt", egui::Color32::from_rgb(150, 40, 40));
+        }
+        match file_status {
+            Some(FileStatus::Missing) => {
+                badge(ui, "File missing", egui::Color32::from_rgb(150, 40, 40))
+            }
+            Some(FileStatus::Empty) => {
+                badge(ui, "Empty file", egui::Color32::from_rgb(150, 40, 40))
+            }
+            _ => {}
         }
         if !rec.completed {
             badge(ui, "Recording", egui::Color32::from_rgb(0, 120, 60));
@@ -270,6 +345,13 @@ fn show_inner(ui: &mut egui::Ui, rec: &Recording, server_url: &str) -> Recording
         }
         if rec.completed && ui.button("⬇ Download").clicked() {
             action.download = true;
+        }
+    });
+    ui.horizontal(|ui| {
+        for kind in [FileInfo::Details, FileInfo::DebugLog] {
+            if ui.button(kind.label()).clicked() {
+                action.file_info = Some(kind);
+            }
         }
     });
 

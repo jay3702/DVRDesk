@@ -65,9 +65,20 @@ pub struct App {
     disabled_ad_blocks: HashSet<usize>,
     skip_toast_until: Option<Instant>,
 
-    /// Playback speed for recordings and videos, kept for the rest of the
-    /// session once picked. Live channels always play at 1x.
+    /// Playback speed of the current recording or video. Speed belongs to
+    /// the content, so every new video starts back at 1x. Live channels
+    /// always play at 1x.
     playback_speed: f64,
+
+    /// Video popped out into its own picture-in-picture window. Survives
+    /// starting another video without closing (channel-surfing from the
+    /// guide keeps the video in the PIP window); closing playback resets it.
+    player_pip: bool,
+
+    /// The URL or local path last handed to mpv. Until mpv reports it as
+    /// its current `path`, position/duration/tracks still describe the
+    /// previous file — see `player_on_current_file`.
+    playing_url: String,
 
     /// Last time the player overlay saw pointer activity (movement, click,
     /// or press) — reset whenever a new playback session starts. Drives
@@ -93,6 +104,15 @@ pub struct App {
     /// pass-management UI to link to.
     pending_pass_notice: Option<String>,
 
+    /// The last thing that failed, shown as a dismissible error banner: a
+    /// playback attempt (mpv can't load the file, or an in-progress
+    /// recording's stream can't be resolved) or a trash / watched change.
+    /// All of these used to fail silently.
+    error_notice: Option<String>,
+
+    /// The open Details / Debug Log dialog, if any.
+    file_info: Option<FileInfoDialog>,
+
     /// `Some` once a genuinely newer `native-v*` release is found — see
     /// `api/github.rs`'s doc comment for why this is scoped to that tag
     /// prefix specifically rather than trusting GitHub's own "latest"
@@ -102,6 +122,9 @@ pub struct App {
     update_dismissed: bool,
 
     downloads: crate::downloads::Downloads,
+    /// Whether the DVR can serve a recording's file, checked from the
+    /// detail page (see `crate::file_check`).
+    file_checks: crate::file_check::FileChecks,
     deploys: crate::deploy::Deploys,
     channel_genres: crate::channel_genres::ChannelGenres,
 }
@@ -128,7 +151,14 @@ impl App {
                 let mpv_log = settings
                     .diagnostics_enabled
                     .then(|| settings.cache_path().join("mpv.log"));
-                Player::new(get_proc_address, mpv_log.as_deref())
+                // Targets the root window explicitly: this runs on an mpv
+                // thread, where "the current viewport" could be the PIP one
+                // mid-frame. The PIP window repaints along with the root.
+                Player::new(
+                    get_proc_address,
+                    mpv_log.as_deref(),
+                    repaint_notifier(cc.egui_ctx.clone()),
+                )
             }
             None => Err(
                 "cc.get_proc_address is None — eframe is not using the Glow renderer".to_string(),
@@ -147,6 +177,10 @@ impl App {
         );
         let deploys =
             crate::deploy::Deploys::new(bridge.runtime.handle().clone(), cc.egui_ctx.clone());
+        let file_checks = crate::file_check::FileChecks::new(
+            bridge.runtime.handle().clone(),
+            cc.egui_ctx.clone(),
+        );
         let channel_genres = crate::channel_genres::ChannelGenres::load(
             crate::paths::data_dir().map(|d| d.join("channel_genres.json")),
         );
@@ -197,6 +231,8 @@ impl App {
 
             playback_speed: 1.0,
 
+            player_pip: false,
+            playing_url: String::new(),
             player_controls_active_since: Instant::now(),
 
             show_stats: false,
@@ -209,10 +245,13 @@ impl App {
             },
 
             pending_pass_notice: None,
+            error_notice: None,
+            file_info: None,
             update_info: None,
             update_dismissed: false,
 
             downloads,
+            file_checks,
             deploys,
             channel_genres,
         }
@@ -259,6 +298,7 @@ impl App {
                     resume_time: rec.playback_time,
                     recording_kind: Some(rec.recording_kind()),
                     live: false,
+                    too_short: rec.too_short(),
                 },
             );
             return;
@@ -302,6 +342,7 @@ impl App {
                 resume_time: video.playback_time,
                 recording_kind: None,
                 live: false,
+                too_short: false,
             },
         );
     }
@@ -326,6 +367,7 @@ impl App {
                 resume_time: 0.0,
                 recording_kind: None,
                 live: true,
+                too_short: false,
             },
         );
     }
@@ -333,12 +375,16 @@ impl App {
     /// Shared reset of every per-session playback guard — factored out once
     /// a second caller (library videos) needed the identical bookkeeping.
     fn start_now_playing(&mut self, url: &str, now_playing: NowPlaying) {
+        self.error_notice = None;
         let Ok(player) = &self.player else {
             self.mpv_needed.open = true;
             return;
         };
         player.load_url(url);
-        player.set_speed(if now_playing.live { 1.0 } else { self.playback_speed });
+        // mpv keeps `speed` across loads, so it's reset explicitly.
+        self.playback_speed = 1.0;
+        player.set_speed(1.0);
+        self.playing_url = url.to_string();
 
         self.now_playing = Some(now_playing);
         self.has_applied_resume = false;
@@ -365,6 +411,19 @@ impl App {
     /// to call every frame — see `player::captions` for why that (rather
     /// than trying to catch one precise "file loaded" event) is what
     /// actually fixes the sid-timing race found during manual testing.
+    /// Whether mpv has actually switched to the file last loaded. Every
+    /// per-frame tick below checks this first: on the frame Play is
+    /// pressed, mpv still reports the previous file's position, duration
+    /// and tracks, which was applying the new recording's resume seek
+    /// against the old file (and losing it), and could save the old file's
+    /// position — or mark the new recording watched — on the new one.
+    fn player_on_current_file(&self) -> bool {
+        match &self.player {
+            Ok(player) => player.path().as_deref() == Some(self.playing_url.as_str()),
+            Err(_) => false,
+        }
+    }
+
     fn tick_captions(&mut self) {
         let Ok(player) = &self.player else {
             return;
@@ -522,9 +581,116 @@ impl App {
         );
     }
 
+    /// Opens the Details / Debug Log dialog for a recording and fetches its
+    /// text from the DVR.
+    fn open_file_info(
+        &mut self,
+        ctx: &egui::Context,
+        kind: ui::recording_detail::FileInfo,
+        rec: &api::types::Recording,
+    ) {
+        let Some(server_url) = self.active_server_url() else {
+            return;
+        };
+        let subtitle = match (&rec.episode_title, rec.season_number, rec.episode_number) {
+            (Some(ep), Some(s), Some(e)) => format!(" S{s}E{e} {ep}"),
+            (Some(ep), _, _) => format!(" {ep}"),
+            _ => String::new(),
+        };
+        self.file_info = Some(FileInfoDialog {
+            id: rec.id.clone(),
+            kind,
+            title: format!("{}: {}{subtitle}", kind.label(), rec.title),
+            body: None,
+        });
+        let id = rec.id.clone();
+        let tx = self.bridge.tx.clone();
+        let ctx = ctx.clone();
+        self.bridge.runtime.spawn(async move {
+            use ui::file_details::FileInfoBody;
+            let result = match kind {
+                ui::recording_detail::FileInfo::Details => {
+                    api::recordings::fetch_file_details(&server_url, &id)
+                        .await
+                        .map(|record| FileInfoBody::Details {
+                            raw: serde_json::to_string_pretty(&record).unwrap_or_default(),
+                            record,
+                        })
+                }
+                ui::recording_detail::FileInfo::DebugLog => {
+                    api::recordings::fetch_file_log(&server_url, &id)
+                        .await
+                        .map(FileInfoBody::Log)
+                }
+            };
+            async_bridge::send_and_repaint(&tx, &ctx, Msg::FileInfoLoaded { id, kind, result });
+        });
+    }
+
+    /// The Details / Debug Log dialog: a resizable window with the record
+    /// rendered as sections (`ui::file_details`), or the log as scrollable,
+    /// selectable monospace text.
+    fn show_file_info(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &self.file_info else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new(&dialog.title)
+            .id(egui::Id::new("file_info_dialog"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([720.0, 520.0])
+            .show(ctx, |ui| match &dialog.body {
+                None => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Loading…");
+                    });
+                }
+                Some(Err(e)) => {
+                    ui.colored_label(ui.visuals().error_fg_color, e);
+                }
+                Some(Ok(ui::file_details::FileInfoBody::Details { record, raw })) => {
+                    if ui.button("Copy JSON").clicked() {
+                        ctx.copy_text(raw.clone());
+                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| ui::file_details::show(ui, record, raw));
+                }
+                Some(Ok(ui::file_details::FileInfoBody::Log(text))) if text.trim().is_empty() => {
+                    ui.weak("The DVR returned an empty log for this recording.");
+                }
+                Some(Ok(ui::file_details::FileInfoBody::Log(text))) => {
+                    if ui.button("Copy").clicked() {
+                        ctx.copy_text(text.clone());
+                    }
+                    egui::ScrollArea::both()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            // Read-only (`&str`) but still selectable, so
+                            // part of it can be copied too.
+                            ui.add(
+                                egui::TextEdit::multiline(&mut text.as_str())
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                }
+            });
+        if !open {
+            self.file_info = None;
+        }
+    }
+
     fn stop_playback(&mut self, ctx: &egui::Context) {
+        // Only save a position mpv actually reports for this recording —
+        // not the previous file's (closed before mpv switched over), or 0
+        // for one that failed to load.
+        let on_current_file = self.player_on_current_file();
         if let (Some(now_playing), Ok(player)) = (&self.now_playing, &self.player) {
-            if now_playing.recording_kind.is_some() {
+            if now_playing.recording_kind.is_some() && on_current_file {
                 if let Some(server_url) = self.active_server_url() {
                     let pos = player.position_secs().unwrap_or(0.0);
                     let id = now_playing.id.clone();
@@ -550,6 +716,10 @@ impl App {
             player.stop();
         }
         self.now_playing = None;
+        // Closing ends a pop-out, so the next video starts docked. Tuning
+        // another channel while popped out doesn't come through here and
+        // stays in the PIP window.
+        self.player_pip = false;
         // The only Fullscreen/Exit Fullscreen control lives in the player
         // overlay — closing playback while fullscreen used to strand the
         // whole app fullscreen with no way back out.
@@ -695,7 +865,12 @@ impl App {
                     result,
                 } => {
                     if let Err(e) = result {
-                        eprintln!("watched-toggle: {e} — rolling back optimistic update");
+                        crate::logline!("watched-toggle {id}: {e} — rolling back optimistic update");
+                        self.error_notice = Some(format!(
+                            "Couldn't mark {} {}: {e}",
+                            recording_title(&self.tv_shows.episodes, &id),
+                            if watched { "watched" } else { "unwatched" }
+                        ));
                         // Roll back the optimistic flip applied at click time.
                         patch_watched(&mut self.tv_shows.episodes, &id, !watched);
                         patch_watched(&mut self.recent.items, &id, !watched);
@@ -704,7 +879,11 @@ impl App {
                 }
                 Msg::Trashed { id, result } => {
                     if let Err(e) = result {
-                        eprintln!("trash: {e}");
+                        crate::logline!("trash {id}: {e}");
+                        self.error_notice = Some(format!(
+                            "Couldn't trash {}: {e}",
+                            recording_title(&self.tv_shows.episodes, &id)
+                        ));
                     } else {
                         // Grab the trashed episode's show/watched status
                         // before removing it — needed to patch the TV Shows
@@ -742,8 +921,16 @@ impl App {
                         }
                     }
                 }
-                Msg::GuideLoaded { server_id, result } => {
-                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str()) {
+                Msg::GuideLoaded {
+                    server_id,
+                    day,
+                    result,
+                } => {
+                    // Dropped when the user has since picked another day, as
+                    // well as for a server that's no longer active.
+                    if self.settings.active_server_id.as_deref() == Some(server_id.as_str())
+                        && day == self.live.day
+                    {
                         self.live.guide = match result {
                             Ok(v) => ui::Loaded::Ready(v),
                             Err(e) => ui::Loaded::Err(e),
@@ -917,6 +1104,15 @@ impl App {
                     Ok(rec) => self.start_playback(ctx, &rec),
                     Err(e) => eprintln!("in-progress recording lookup: {e}"),
                 },
+                Msg::FileInfoLoaded { id, kind, result } => {
+                    // Dropped if the dialog was closed or switched to
+                    // another recording/view while this was in flight.
+                    if let Some(dialog) = &mut self.file_info {
+                        if dialog.id == id && dialog.kind == kind {
+                            dialog.body = Some(result);
+                        }
+                    }
+                }
                 Msg::HlsVariantResolved { recording, result } => match result {
                     Ok(url) => {
                         self.start_now_playing(
@@ -930,13 +1126,18 @@ impl App {
                                 resume_time: recording.playback_time,
                                 recording_kind: Some(recording.recording_kind()),
                                 live: false,
+                                too_short: recording.too_short(),
                             },
                         );
                     }
-                    Err(e) => eprintln!(
-                        "HLS variant resolution for in-progress recording {}: {e}",
-                        recording.id
-                    ),
+                    Err(e) => {
+                        crate::logline!(
+                            "HLS variant resolution for in-progress recording {}: {e}",
+                            recording.id
+                        );
+                        self.error_notice =
+                            Some(format!("Couldn't play \"{}\": {e}", recording.title));
+                    }
                 },
             }
         }
@@ -1169,12 +1370,25 @@ impl App {
                 (active_server_id.clone(), self.active_server_url())
             {
                 self.live.guide = ui::Loaded::Loading;
+                let day = self.live.day;
                 let tx = self.bridge.tx.clone();
                 let ctx2 = ctx.clone();
                 self.bridge.runtime.spawn(async move {
-                    let result =
-                        api::guide::fetch_guide(&server_url, ui::live::GUIDE_DURATION_SECS).await;
-                    async_bridge::send_and_repaint(&tx, &ctx2, Msg::GuideLoaded { server_id, result });
+                    let result = api::guide::fetch_guide(
+                        &server_url,
+                        ui::live::GUIDE_DURATION_SECS,
+                        ui::live::day_start(day),
+                    )
+                    .await;
+                    async_bridge::send_and_repaint(
+                        &tx,
+                        &ctx2,
+                        Msg::GuideLoaded {
+                            server_id,
+                            day,
+                            result,
+                        },
+                    );
                 });
             }
         }
@@ -1585,6 +1799,56 @@ impl App {
         });
     }
 
+    /// Bulk Mark Watched / Unwatched. Applied to the lists at once, like a
+    /// single toggle, then sent one at a time in a single background task
+    /// rather than all at once — a show's worth of requests would otherwise
+    /// hit the DVR together. Each result goes through the same
+    /// `Msg::WatchedToggled` handling (rollback, error banner) as a single
+    /// toggle.
+    fn set_watched_many(&mut self, ctx: &egui::Context, ids: Vec<String>, watched: bool) {
+        let Some(server_url) = self.active_server_url() else {
+            return;
+        };
+        for id in &ids {
+            patch_watched(&mut self.tv_shows.episodes, id, watched);
+            patch_watched(&mut self.recent.items, id, watched);
+            patch_watched(&mut self.movies.items, id, watched);
+        }
+        let tx = self.bridge.tx.clone();
+        let ctx = ctx.clone();
+        self.bridge.runtime.spawn(async move {
+            for id in ids {
+                let result = api::recordings::set_watched(&server_url, &id, watched).await;
+                async_bridge::send_and_repaint(
+                    &tx,
+                    &ctx,
+                    Msg::WatchedToggled {
+                        id,
+                        watched,
+                        result,
+                    },
+                );
+            }
+        });
+    }
+
+    /// Bulk Trash, one recording at a time in a single background task (see
+    /// `set_watched_many`). Each result goes through `Msg::Trashed`, so the
+    /// cards disappear one by one as the DVR confirms each.
+    fn trash_many(&mut self, ctx: &egui::Context, ids: Vec<String>) {
+        let Some(server_url) = self.active_server_url() else {
+            return;
+        };
+        let tx = self.bridge.tx.clone();
+        let ctx = ctx.clone();
+        self.bridge.runtime.spawn(async move {
+            for id in ids {
+                let result = api::recordings::trash_recording(&server_url, &id).await;
+                async_bridge::send_and_repaint(&tx, &ctx, Msg::Trashed { id, result });
+            }
+        });
+    }
+
     fn trash(&mut self, ctx: &egui::Context, id: &str) {
         let Some(server_url) = self.active_server_url() else {
             return;
@@ -1957,6 +2221,8 @@ impl eframe::App for App {
         }
         if matches!(self.screen, Screen::Search) {
             self.ensure_search_loaded(ctx);
+            // For Search's "On TV" matches.
+            self.ensure_live_loaded(ctx);
         }
         if matches!(self.screen, Screen::Live) {
             self.ensure_live_loaded(ctx);
@@ -1966,6 +2232,10 @@ impl eframe::App for App {
         let mut trash_action: Option<String> = None;
         let mut download_action: Option<api::types::Recording> = None;
         let mut download_play_action: Option<String> = None;
+        let mut watched_many_action: Option<(Vec<String>, bool)> = None;
+        let mut trash_many_action: Option<Vec<String>> = None;
+        let mut file_info_action: Option<(ui::recording_detail::FileInfo, api::types::Recording)> =
+            None;
         let mut play_video: Option<api::types::Video> = None;
         let mut live_action = ui::live::LiveAction::None;
 
@@ -2008,6 +2278,20 @@ impl eframe::App for App {
                         ui.add_space(4.0);
                     }
                 }
+                if let Some(error) = self.error_notice.clone() {
+                    egui::Frame::none()
+                        .fill(ui.visuals().error_fg_color.gamma_multiply(0.15))
+                        .inner_margin(6.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(&error);
+                                if ui.small_button("✖").clicked() {
+                                    self.error_notice = None;
+                                }
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
                 if let Some(notice) = self.pending_pass_notice.clone() {
                     egui::Frame::none()
                         .fill(ui.visuals().warn_fg_color.gamma_multiply(0.15))
@@ -2032,10 +2316,12 @@ impl eframe::App for App {
                             ui.label("Configure a server in Settings first.");
                             return None;
                         };
-                        let action = ui::recent::show(ui, &mut self.recent, &server_url);
+                        let action =
+                            ui::recent::show(ui, &mut self.recent, &server_url, &self.file_checks);
                         toggle_watched_action = action.toggle_watched;
                         trash_action = action.trash;
                         download_action = action.download;
+                        file_info_action = action.file_info;
                         action.play
                     }
                     Screen::TvShows {
@@ -2054,6 +2340,7 @@ impl eframe::App for App {
                             episode_id.as_deref(),
                             filter.as_deref(),
                             &server_url,
+                            &self.file_checks,
                         );
                         if let Some(new_screen) = nav.new_screen {
                             self.screen = new_screen;
@@ -2061,6 +2348,9 @@ impl eframe::App for App {
                         toggle_watched_action = nav.toggle_watched;
                         trash_action = nav.trash;
                         download_action = nav.download;
+                        file_info_action = nav.file_info;
+                        watched_many_action = nav.set_watched_many;
+                        trash_many_action = nav.trash_many;
                         nav.play
                     }
                     Screen::Movies { movie_id } => {
@@ -2073,6 +2363,7 @@ impl eframe::App for App {
                             &mut self.movies,
                             movie_id.as_deref(),
                             &server_url,
+                            &self.file_checks,
                         );
                         if let Some(new_screen) = action.new_screen {
                             self.screen = new_screen;
@@ -2080,6 +2371,7 @@ impl eframe::App for App {
                         toggle_watched_action = action.toggle_watched;
                         trash_action = action.trash;
                         download_action = action.download;
+                        file_info_action = action.file_info;
                         action.play
                     }
                     Screen::Library { group_id, video_id } => {
@@ -2119,8 +2411,16 @@ impl eframe::App for App {
                     Screen::Search => {
                         if self.active_server_url().is_none() {
                             ui.label("Configure a server in Settings first.");
-                        } else if let Some(new_screen) = ui::search::show(ui, &mut self.search) {
-                            self.screen = new_screen;
+                        } else if let Some(target) =
+                            ui::search::show(ui, &mut self.search, &self.live)
+                        {
+                            match target {
+                                ui::search::SearchTarget::Screen(screen) => self.screen = screen,
+                                ui::search::SearchTarget::Guide(jump) => {
+                                    self.live.jump_to = Some(jump);
+                                    self.screen = Screen::Live;
+                                }
+                            }
                         }
                         None
                     }
@@ -2181,6 +2481,16 @@ impl eframe::App for App {
         if let Some(id) = trash_action {
             self.trash(ctx, &id);
         }
+        if let Some((ids, watched)) = watched_many_action {
+            self.set_watched_many(ctx, ids, watched);
+        }
+        if let Some(ids) = trash_many_action {
+            self.trash_many(ctx, ids);
+        }
+        if let Some((kind, rec)) = file_info_action {
+            self.open_file_info(ctx, kind, &rec);
+        }
+        self.show_file_info(ctx);
         if let Some(rec) = download_action {
             if let Some(server_url) = self.active_server_url() {
                 use crate::downloads::Status;
@@ -2229,7 +2539,51 @@ impl eframe::App for App {
             }
         }
 
-        if self.now_playing.is_some() {
+        if let (Some(now_playing), Ok(player)) = (&self.now_playing, &self.player) {
+            if let Some(error) = player.take_load_error() {
+                let mut message = format!("Couldn't play \"{}\": {error}.", now_playing.title);
+                let file_status = self
+                    .active_server_url()
+                    .and_then(|server| self.file_checks.cached(&server, &now_playing.id));
+                match file_status {
+                    Some(crate::file_check::FileStatus::Missing) => {
+                        message.push_str(" Its file isn't on the DVR's disk.")
+                    }
+                    Some(crate::file_check::FileStatus::Empty) => {
+                        message.push_str(" The DVR's file for it is empty.")
+                    }
+                    _ if now_playing.too_short => {
+                        message.push_str(" The DVR reports this recording as under a minute long.")
+                    }
+                    _ => {}
+                }
+                crate::logline!("{message}");
+                self.error_notice = Some(message);
+                self.stop_playback(ctx);
+            }
+        }
+        // A recording that's only a second or two long (see
+        // `Recording::too_short`) plays to its end at once and stops —
+        // reaching the end isn't an error to mpv, so this used to leave a
+        // black player with no explanation.
+        if let (Some(now_playing), Ok(player)) = (&self.now_playing, &self.player) {
+            let length = player.duration_secs().unwrap_or(0.0);
+            if !now_playing.live
+                && length < api::types::MIN_RECORDING_SECS
+                && player.eof_reached()
+                && self.player_on_current_file()
+            {
+                let message = format!(
+                    "\"{}\" ended after {length:.1} seconds: that's all the DVR saved of this \
+                     recording.",
+                    now_playing.title
+                );
+                crate::logline!("{message}");
+                self.error_notice = Some(message);
+                self.stop_playback(ctx);
+            }
+        }
+        if self.now_playing.is_some() && self.player_on_current_file() {
             self.tick_playback_persistence(ctx);
             self.tick_captions();
             self.tick_commercial_skip();
@@ -2241,6 +2595,7 @@ impl eframe::App for App {
         let mut new_speed = None;
         let mut new_show_stats = None;
         let mut save_frame = false;
+        let mut new_pip = None;
         if let Some(now_playing) = &self.now_playing {
             if let Ok(player) = &self.player {
                 let showing_toast = self
@@ -2259,6 +2614,7 @@ impl eframe::App for App {
                     &self.settings.keybindings,
                     self.settings.diagnostics_enabled,
                     self.show_stats,
+                    self.player_pip,
                     &mut self.player_controls_active_since,
                 );
                 close_playback = action.close;
@@ -2267,6 +2623,7 @@ impl eframe::App for App {
                 new_speed = action.new_speed;
                 new_show_stats = action.new_show_stats;
                 save_frame = action.save_frame;
+                new_pip = action.new_pip;
             }
         }
         if save_frame {
@@ -2285,6 +2642,14 @@ impl eframe::App for App {
             self.playback_speed = speed;
             if let Ok(player) = &self.player {
                 player.set_speed(speed);
+            }
+        }
+        if let Some(pip) = new_pip {
+            self.player_pip = pip;
+            // Popping out of a fullscreen main window would leave the app
+            // fullscreen behind the PIP window with nothing playing in it.
+            if pip && ctx.input(|i| i.viewport().fullscreen).unwrap_or(false) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
             }
         }
         if close_playback {
@@ -2385,6 +2750,19 @@ fn find_recording<'a>(
 /// episodes is trashed, removing the show entirely once its count reaches
 /// zero (it no longer exists as a show server-side at that point). Returns
 /// `true` if the show was removed.
+/// "Title S1E4 Episode" for messages, falling back to the bare id when the
+/// recording isn't in the loaded episodes.
+fn recording_title(list: &ui::Loaded<Vec<api::types::Recording>>, id: &str) -> String {
+    match find_recording(list, id) {
+        Some(r) => match (&r.episode_title, r.season_number, r.episode_number) {
+            (Some(ep), Some(s), Some(e)) => format!("\"{} S{s}E{e} {ep}\"", r.title),
+            (Some(ep), _, _) => format!("\"{} {ep}\"", r.title),
+            _ => format!("\"{}\"", r.title),
+        },
+        None => format!("recording {id}"),
+    }
+}
+
 fn patch_show_episode_removed(
     shows: &mut ui::Loaded<Vec<api::types::Show>>,
     show_id: &str,
@@ -2406,4 +2784,48 @@ fn patch_show_episode_removed(
     } else {
         false
     }
+}
+
+/// The Details / Debug Log dialog's state — see `App::show_file_info`.
+struct FileInfoDialog {
+    /// The recording it's for, so a late response for another one is dropped.
+    id: String,
+    kind: ui::recording_detail::FileInfo,
+    title: String,
+    /// `None` while loading.
+    body: Option<Result<ui::file_details::FileInfoBody, String>>,
+}
+
+/// mpv's new-frame callback (see `Player::new`). mpv calls it from its own
+/// threads — including ones its core blocks on — so it must never wait on
+/// egui's context lock, which `request_repaint_of` takes and which the UI
+/// thread holds during `ctx.input` and friends. Waiting there deadlocked
+/// playback start: the UI thread under that lock asked mpv for a property,
+/// mpv's core waited on its video thread, and that thread sat in this
+/// callback waiting for the lock. So the callback only flags a helper
+/// thread, which does the waiting instead. The thread ends when the player
+/// (and with it this closure's sender) is dropped.
+fn repaint_notifier(ctx: egui::Context) -> Box<dyn Fn() + Send + Sync> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+
+    let (tx, rx) = mpsc::channel::<()>();
+    let pending = Arc::new(AtomicBool::new(false));
+    let thread_pending = pending.clone();
+    std::thread::Builder::new()
+        .name("mpv-repaint".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                thread_pending.store(false, Ordering::Release);
+                ctx.request_repaint_of(egui::ViewportId::ROOT);
+            }
+        })
+        .expect("failed to spawn the mpv repaint thread");
+    Box::new(move || {
+        // Coalesced: one wakeup in flight is enough for any number of
+        // frames that arrive before it's handled.
+        if !pending.swap(true, Ordering::AcqRel) {
+            let _ = tx.send(());
+        }
+    })
 }

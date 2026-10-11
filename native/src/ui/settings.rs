@@ -275,6 +275,9 @@ pub fn show(
         {
             action.settings_changed = true;
         }
+        if let Some(hint) = crate::ui::always_on_top_hint() {
+            ui.label(egui::RichText::new(hint).small().weak());
+        }
         ui.add_space(8.0);
         ui.separator();
 

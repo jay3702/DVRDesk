@@ -34,7 +34,23 @@ pub fn columns_for_width(available_width: f32) -> usize {
     (((available_width + GRID_SPACING) / (CARD_WIDTH + GRID_SPACING)).floor() as usize).max(1)
 }
 
+/// Optional extras a caller can turn on for a card: multi-select and the
+/// file check result. `Default` is a plain card.
+#[derive(Default)]
+pub struct CardExtras {
+    /// Offer a selection checkbox (shown on hover, or always while
+    /// `selecting`).
+    pub selectable: bool,
+    pub checked: bool,
+    /// Some card in the grid is checked, so every card shows its checkbox.
+    pub selecting: bool,
+    /// Whether the DVR can serve the file — see `crate::file_check`.
+    pub file_status: Option<crate::file_check::FileStatus>,
+}
+
 pub struct MediaCardAction {
+    /// The selection checkbox was clicked.
+    pub check_clicked: bool,
     pub clicked: bool,
     pub double_clicked: bool,
     /// The download icon was clicked — only ever `true` for a completed
@@ -65,17 +81,12 @@ fn fmt_duration(total_secs: f64) -> String {
 }
 
 fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
-    egui::Frame::default()
-        .fill(color)
-        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
-        .rounding(4.0)
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .size(9.0)
-                    .color(egui::Color32::WHITE),
-            );
-        });
+    super::badge(
+        ui,
+        egui::RichText::new(text).size(9.0),
+        color,
+        egui::vec2(4.0, 1.0),
+    );
 }
 
 /// `title`/`subtitle` are caller-supplied since TV Shows (`S1E4`, episode
@@ -88,13 +99,23 @@ pub fn show(
     title: &str,
     subtitle: Option<&str>,
     selected: bool,
+    extras: &CardExtras,
 ) -> MediaCardAction {
+    use crate::file_check::FileStatus;
+    let selected = selected || extras.checked;
     let id = ui.make_persistent_id(("media_card", &rec.id));
     let mut art_rect = egui::Rect::NOTHING;
+    // Mouseover highlight. Whether the card is hovered is only known once
+    // it's been laid out, after its fill is already painted, so the fill
+    // uses last frame's answer (stored below).
+    let hover_id = id.with("hovered");
+    let was_hovered = ui.data(|d| d.get_temp::<bool>(hover_id)).unwrap_or(false);
 
     let outer = ui.allocate_ui(egui::vec2(CARD_WIDTH, 0.0), |ui| {
         let fill = if selected {
             ui.visuals().selection.bg_fill.linear_multiply(0.3)
+        } else if was_hovered {
+            ui.visuals().widgets.hovered.weak_bg_fill
         } else {
             ui.visuals().extreme_bg_color
         };
@@ -190,6 +211,22 @@ pub fn show(
                                 if rec.corrupted {
                                     badge(ui, "Interrupted", egui::Color32::from_rgb(122, 26, 26));
                                 }
+                                if rec.too_short() {
+                                    badge(ui, "Corrupt", egui::Color32::from_rgb(122, 26, 26));
+                                }
+                                match extras.file_status {
+                                    Some(FileStatus::Missing) => badge(
+                                        ui,
+                                        "File missing",
+                                        egui::Color32::from_rgb(122, 26, 26),
+                                    ),
+                                    Some(FileStatus::Empty) => badge(
+                                        ui,
+                                        "Empty file",
+                                        egui::Color32::from_rgb(122, 26, 26),
+                                    ),
+                                    _ => {}
+                                }
                                 if !rec.completed {
                                     badge(ui, "Recording", egui::Color32::from_rgb(122, 26, 26));
                                 }
@@ -237,6 +274,14 @@ pub fn show(
 
     let response = ui.interact(outer.response.rect, id, egui::Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // The pointer position, not `response.hovered()`: over the download
+    // icon, that icon is the hovered widget, but the card should stay lit.
+    let hovered = ui.rect_contains_pointer(outer.response.rect);
+    if hovered != was_hovered {
+        ui.data_mut(|d| d.insert_temp(hover_id, hovered));
+        // Draw the change now, not on the next mouse move.
+        ui.ctx().request_repaint();
+    }
 
     // Registered *after* the whole-card interact above, so this smaller
     // hotspot wins the pointer for the pixels it overlaps — egui resolves
@@ -271,7 +316,44 @@ pub fn show(
         download_clicked = dl_response.clicked();
     }
 
+    // Selection checkbox, top-left of the art — registered last so it wins
+    // the pointer over the card beneath it, like the download icon.
+    let mut check_clicked = false;
+    if extras.selectable && (extras.selecting || extras.checked || hovered) {
+        let box_rect = egui::Rect::from_min_size(
+            art_rect.left_top() + egui::vec2(6.0, 6.0),
+            egui::vec2(22.0, 22.0),
+        );
+        let check_id = ui.make_persistent_id(("media_card_check", &rec.id));
+        let check_response = ui
+            .interact(box_rect, check_id, egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Select (Ctrl-click a card, Shift-click for a range)");
+        let accent = ui.visuals().selection.stroke.color;
+        ui.painter().rect(
+            box_rect,
+            4.0,
+            if extras.checked {
+                accent
+            } else {
+                egui::Color32::from_black_alpha(170)
+            },
+            egui::Stroke::new(1.5_f32, egui::Color32::WHITE),
+        );
+        if extras.checked {
+            ui.painter().text(
+                box_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "✔",
+                egui::FontId::proportional(14.0),
+                egui::Color32::WHITE,
+            );
+        }
+        check_clicked = check_response.clicked();
+    }
+
     MediaCardAction {
+        check_clicked,
         clicked: response.clicked(),
         double_clicked: response.double_clicked(),
         download_clicked,

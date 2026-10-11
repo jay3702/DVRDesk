@@ -60,7 +60,9 @@ DVRDesk plays video with your system's libmpv.
 - **Captions:** broadcast captions and Channels DVR's Py-Captions, with adjustable size, color and background.
 - **Commercial skip** for recordings with detected commercials.
 - **Playback speed** from 0.5x to 2x for recordings and videos.
+- **Picture-in-picture:** **Pop Out** moves the video into its own window that stays on top, so you can keep browsing. It has no title bar: drag the picture to move it, double-click for fullscreen, and drag its right or bottom edge to resize it. It always keeps the video's shape, with the controls floating over the picture. **Dock** puts it back. On Linux under Wayland, apps can't keep a window on top themselves; in GNOME, press Alt+Space on the window and choose **Always on Top**.
 - **Downloads** to watch recordings offline.
+- **Library cleanup:** opening a show checks each episode's file on the DVR and flags any that are missing or empty. Select several episodes (check them, Ctrl-click, or Shift-click for a range) to mark them watched or unwatched, or move them to the DVR's trash, all at once.
 - **Keyboard control**, with keys you can change in Settings. The defaults:
 
   | Action | Keys |

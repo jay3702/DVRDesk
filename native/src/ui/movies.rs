@@ -81,6 +81,8 @@ pub struct MoviesAction {
     pub toggle_watched: Option<(String, bool)>,
     pub trash: Option<String>,
     pub download: Option<Recording>,
+    /// Details / Debug Log clicked on the detail page, for this recording.
+    pub file_info: Option<(super::recording_detail::FileInfo, Recording)>,
 }
 
 /// Keyboard nav relies on egui's own Tab-focus system — see `ui::recent`'s
@@ -90,6 +92,7 @@ pub fn show(
     state: &mut MoviesState,
     movie_id: Option<&str>,
     server_url: &str,
+    file_checks: &crate::file_check::FileChecks,
 ) -> MoviesAction {
     let mut action = MoviesAction::default();
 
@@ -193,6 +196,7 @@ pub fn show(
                                     &m.title,
                                     None,
                                     is_selected,
+                                    &super::media_card::CardExtras::default(),
                                 );
                                 if card_action.double_clicked {
                                     action.play = Some((*m).clone());
@@ -217,7 +221,7 @@ pub fn show(
 
     match movie_id.and_then(|id| movies.iter().find(|m| m.id == id)) {
         Some(m) => {
-            let detail = super::recording_detail::show(ui, m, server_url);
+            let detail = super::recording_detail::show(ui, m, server_url, file_checks);
             if detail.play {
                 action.play = Some(m.clone());
             }
@@ -229,6 +233,9 @@ pub fn show(
             }
             if detail.download {
                 action.download = Some(m.clone());
+            }
+            if let Some(kind) = detail.file_info {
+                action.file_info = Some((kind, m.clone()));
             }
         }
         None => {

@@ -64,6 +64,8 @@ pub struct RecentAction {
     pub toggle_watched: Option<(String, bool)>,
     pub trash: Option<String>,
     pub download: Option<Recording>,
+    /// Details / Debug Log clicked on the detail page, for this recording.
+    pub file_info: Option<(super::recording_detail::FileInfo, Recording)>,
 }
 
 struct TimeGroup {
@@ -131,7 +133,12 @@ fn group_by_day_time(recordings: &[Recording]) -> Vec<DayGroup> {
 /// `Response::clicked()` already returns true on Enter/Space natively, so
 /// selecting via keyboard needs no extra code beyond the `.clicked()`
 /// check already here for mouse clicks.
-pub fn show(ui: &mut egui::Ui, state: &mut RecentState, server_url: &str) -> RecentAction {
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut RecentState,
+    server_url: &str,
+    file_checks: &crate::file_check::FileChecks,
+) -> RecentAction {
     let mut action = RecentAction::default();
 
     match &state.items {
@@ -231,6 +238,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut RecentState, server_url: &str) -> Rec
                                             rec.channel.as_deref(),
                                             &channel_logos,
                                         );
+                                        let bg = super::row_background(ui);
                                         let row = ui.horizontal(|ui| {
                                             super::thumb::show(
                                                 ui,
@@ -246,6 +254,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut RecentState, server_url: &str) -> Rec
                                         });
                                         let resp = super::row_click(
                                             ui,
+                                            bg,
                                             row.response.rect,
                                             ("recent_row", &rec.id),
                                         );
@@ -274,7 +283,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut RecentState, server_url: &str) -> Rec
                 .and_then(|id| recordings.iter().find(|r| r.id == id))
             {
                 Some(rec) => {
-                    let detail = super::recording_detail::show(ui, rec, server_url);
+                    let detail = super::recording_detail::show(ui, rec, server_url, file_checks);
                     if detail.play {
                         action.play = Some(rec.clone());
                     }
@@ -283,6 +292,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut RecentState, server_url: &str) -> Rec
                     }
                     if detail.download {
                         action.download = Some(rec.clone());
+                    }
+                    if let Some(kind) = detail.file_info {
+                        action.file_info = Some((kind, rec.clone()));
                     }
                     if detail.trash {
                         action.trash = Some(rec.id.clone());

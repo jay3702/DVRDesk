@@ -1,7 +1,10 @@
 //! Custom `egui::Visuals` (dark + light), ported from the old Tauri/React
 //! app's own actual palette (`../../src/themes.css` at the repo root — the
 //! React app, not this crate) rather than relying on egui's stock gray/blue
-//! defaults. Each starts from `egui::Visuals::dark()`/`::light()` so any
+//! defaults. Dark mode's backgrounds have since moved off that palette's
+//! near-black navy to neutral grays: channel logos are mostly transparent
+//! PNGs, and black ones (CBS) vanished against it. Its accent and selection
+//! blues are still the old app's. Each starts from `egui::Visuals::dark()`/`::light()` so any
 //! field not explicitly listed here keeps a sane egui default instead of
 //! being left zeroed.
 //!
@@ -26,12 +29,14 @@ const ROUNDING: Rounding = Rounding::same(4.0);
 pub fn dark_visuals() -> Visuals {
     let mut v = Visuals::dark();
 
-    v.panel_fill = rgb(0x12121e); // --wc-bg
-    v.widgets.noninteractive.bg_fill = rgb(0x12121e); // --wc-bg
-    v.window_fill = rgb(0x1e1e2e); // --wc-bg-surface
-    v.code_bg_color = rgb(0x111826); // --wc-bg-surface-2
-    v.extreme_bg_color = rgb(0x1a1a28); // --wc-bg-input
-    v.faint_bg_color = rgb(0x1e1e30); // --wc-bg-hover
+    // Same gray as the Live guide's logo plate, light enough for black logos
+    // to read against it.
+    v.panel_fill = rgb(0x333333);
+    v.widgets.noninteractive.bg_fill = rgb(0x333333);
+    v.window_fill = rgb(0x3b3b3b); // dialogs/popups, a step above the panel
+    v.code_bg_color = rgb(0x2b2b2b);
+    v.extreme_bg_color = rgb(0x262626); // text inputs, a step below
+    v.faint_bg_color = rgb(0x3a3a3a);
     v.hyperlink_color = rgb(0x0078d4); // --wc-accent
     v.warn_fg_color = rgb(0xe07b00); // --wc-warn
     v.error_fg_color = rgb(0xe06c75); // --wc-error
@@ -39,17 +44,17 @@ pub fn dark_visuals() -> Visuals {
     v.selection.bg_fill = rgb(0x1a3a5c); // --wc-bg-active
     v.selection.stroke = Stroke::new(1.0_f32, rgb(0x0078d4)); // --wc-accent
 
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0x2a2a3a)); // --wc-border
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, rgb(0x4a4a4a));
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, rgb(0xd4d4d4)); // --wc-text
     v.widgets.noninteractive.rounding = ROUNDING;
 
-    v.widgets.inactive.bg_fill = rgb(0x2a2f42); // --wc-bg-btn-secondary
-    v.widgets.inactive.weak_bg_fill = rgb(0x2a2f42);
+    v.widgets.inactive.bg_fill = rgb(0x464646);
+    v.widgets.inactive.weak_bg_fill = rgb(0x464646);
     v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, rgb(0xd4d4d4)); // --wc-text
     v.widgets.inactive.rounding = ROUNDING;
 
-    v.widgets.hovered.bg_fill = rgb(0x38415f); // --wc-bg-btn-secondary-hover
-    v.widgets.hovered.weak_bg_fill = rgb(0x38415f);
+    v.widgets.hovered.bg_fill = rgb(0x575757);
+    v.widgets.hovered.weak_bg_fill = rgb(0x575757);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, rgb(0x0078d4)); // --wc-border-focus
     v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, rgb(0xe0e0e0)); // --wc-text-heading
     v.widgets.hovered.rounding = ROUNDING;

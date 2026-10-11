@@ -199,7 +199,23 @@ pub struct Channel {
     pub encrypted: bool,
 }
 
+/// Below this, a completed recording is treated as failed (see
+/// `Recording::too_short`).
+pub const MIN_RECORDING_SECS: f64 = 60.0;
+
 impl Recording {
+    /// Completed, but too short to be a real recording — the DVR failed to
+    /// save it. Seen as 0 length for an empty file (`stream.mpg` serves 0
+    /// bytes) and for one missing from disk (it 404s); the DVR omits
+    /// `duration` for those, which defaults it to 0 here. Also seen as a
+    /// 1.3 s, 9 MB file from an hour-long recording whose signal stats were
+    /// clean throughout: the stream arrived, but almost none was written.
+    /// No real program is under a minute. Separate from `corrupted`, which
+    /// the DVR's own UI shows as "Interrupted" and often still plays.
+    pub fn too_short(&self) -> bool {
+        self.completed && self.duration < MIN_RECORDING_SECS
+    }
+
     /// Same inference RecentRecordings.tsx used: `show_id` present means an
     /// episode, absent means a movie.
     pub fn recording_kind(&self) -> crate::state::now_playing::RecordingKind {
