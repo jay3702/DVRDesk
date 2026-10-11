@@ -12,7 +12,7 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
-## Native (unreleased)
+## Native v2.3.0
 
 ### 2026-10-10 - Native: picture-in-picture player window
 
