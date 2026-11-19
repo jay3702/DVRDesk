@@ -12,6 +12,18 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native v2.4.0
+
+### 2026-11-19 - Native: scrubber hover thumbnails
+
+- Request: show a thumbnail preview when the pointer is over the playback timeline.
+- Solution:
+  - libmpv has no thumbnail API, so `player::thumbs` runs a second, headless mpv (no video or audio output, paused, frames scaled to 240 px wide) on a worker thread. For each hovered 10 s bucket it keyframe-seeks, waits for the playback-restart event, and writes a JPEG with mpv's screenshot command; the UI decodes it into a cached egui texture.
+  - The worker starts on the first hover, so no extra connection is opened to the DVR unless the user scrubs, and it is torn down when playback closes or the URL changes. Scrubbing faster than decoding drops superseded requests and only decodes the newest bucket. Until a bucket is ready the card shows the nearest cached one. Live streams show the timestamp only.
+- Symptom: the card was clipped by the top of the window in the PIP window, where the controls float along the top edge.
+- Solution: the card sits above the scrubber when it fits and below it otherwise.
+- Validation: builds with no warnings; an ignored test (`THUMB_TEST_URL`) grabs a frame from a generated video, which confirmed screenshots work with `vo=null`. Confirmed by the user in the app.
+
 ## Native v2.3.0
 
 ### 2026-10-10 - Native: picture-in-picture player window
