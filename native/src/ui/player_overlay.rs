@@ -93,6 +93,7 @@ struct View<'a> {
     diagnostics_enabled: bool,
     show_stats: bool,
     pip: bool,
+    thumbs: &'a crate::player::thumbs::Thumbnails,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,6 +112,7 @@ pub fn show(
     show_stats: bool,
     pip: bool,
     controls_active_since: &mut Instant,
+    thumbs: &crate::player::thumbs::Thumbnails,
 ) -> PlayerOverlayAction {
     let mut view = View {
         player,
@@ -125,6 +127,7 @@ pub fn show(
         diagnostics_enabled,
         show_stats,
         pip,
+        thumbs,
     };
     let mut action = PlayerOverlayAction::default();
 
@@ -723,6 +726,19 @@ fn body(
                     view.player.seek(frac * dur);
                 }
             }
+            if let Some(hover) = response.hover_pos() {
+                let frac = ((hover.x - bar_rect.left()) / bar_rect.width()).clamp(0.0, 1.0) as f64;
+                let t = frac * dur;
+                // Skipped for live: there's nothing behind the playhead to show.
+                let tex = if view.now_playing.live {
+                    None
+                } else {
+                    view.player
+                        .path()
+                        .and_then(|url| view.thumbs.get(ctx, &url, t))
+                };
+                scrub_preview(ui, bar_rect, hover.x, t, tex.as_ref());
+            }
             ui.add_space(4.0);
         }
     };
@@ -973,4 +989,57 @@ fn build_report(player: &Player, now_playing: &NowPlaying) -> String {
         fmt_bitrate(player.video_bitrate_bps()),
         fmt_bitrate(player.audio_bitrate_bps()),
     )
+}
+
+/// Floating card above the scrubber: the thumbnail (when one is ready) over
+/// the hovered time, clamped to stay inside the window.
+fn scrub_preview(
+    ui: &egui::Ui,
+    bar: egui::Rect,
+    x: f32,
+    secs: f64,
+    tex: Option<&egui::TextureHandle>,
+) {
+    let screen = ui.ctx().screen_rect();
+    let label = fmt_secs(secs);
+    let thumb = tex.map(|t| {
+        let s = t.size_vec2();
+        let w = 160.0_f32;
+        egui::vec2(w, w * s.y / s.x.max(1.0))
+    });
+    let card_w = thumb.map_or(56.0, |s| s.x) + 8.0;
+    let card_h = thumb.map_or(0.0, |s| s.y + 4.0) + 22.0;
+    let left = (x - card_w / 2.0).clamp(screen.left() + 4.0, (screen.right() - card_w - 4.0).max(screen.left() + 4.0));
+    // Above the bar when there's room, otherwise below it — the PIP controls
+    // float along the top edge, where an above-card would be clipped.
+    let above = bar.top() - card_h - 8.0;
+    let top = if above >= screen.top() + 4.0 {
+        above
+    } else {
+        (bar.bottom() + 8.0).min((screen.bottom() - card_h - 4.0).max(screen.top() + 4.0))
+    };
+    let rect = egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(card_w, card_h));
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("scrub_preview"),
+    ));
+    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(230));
+    let mut y = rect.top() + 4.0;
+    if let (Some(t), Some(size)) = (tex, thumb) {
+        let img = egui::Rect::from_min_size(egui::pos2(rect.left() + 4.0, y), size);
+        painter.image(
+            t.id(),
+            img,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        y += size.y + 4.0;
+    }
+    painter.text(
+        egui::pos2(rect.center().x, y),
+        egui::Align2::CENTER_TOP,
+        label,
+        egui::FontId::proportional(13.0),
+        egui::Color32::WHITE,
+    );
 }

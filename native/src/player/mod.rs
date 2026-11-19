@@ -3,6 +3,7 @@ pub mod commercial_skip;
 pub mod keybindings;
 pub mod mpv_sys;
 pub mod render;
+pub mod thumbs;
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::Path;

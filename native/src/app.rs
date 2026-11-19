@@ -86,6 +86,8 @@ pub struct App {
     /// inactivity so the video can fill the frame; recordings keep their
     /// controls up regardless (see `player_overlay::show`'s own gating).
     player_controls_active_since: Instant,
+    /// Scrubber hover thumbnails (lazy headless mpv; see `player::thumbs`).
+    scrub_thumbs: crate::player::thumbs::Thumbnails,
 
     // Diagnostics — gated on settings.diagnostics_enabled, matching the
     // old app's Shift+S stats overlay / Copy Report button.
@@ -234,6 +236,7 @@ impl App {
             player_pip: false,
             playing_url: String::new(),
             player_controls_active_since: Instant::now(),
+            scrub_thumbs: Default::default(),
 
             show_stats: false,
             applied_caption_style: None,
@@ -404,6 +407,7 @@ impl App {
         // (live only) after a few seconds of inactivity — not hidden
         // instantly on the very frame playback starts.
         self.player_controls_active_since = Instant::now();
+        self.scrub_thumbs.reset();
     }
 
     /// Refreshes the known caption tracks and applies `caption_mode` if the
@@ -715,6 +719,7 @@ impl App {
             }
             player.stop();
         }
+        self.scrub_thumbs.reset();
         self.now_playing = None;
         // Closing ends a pop-out, so the next video starts docked. Tuning
         // another channel while popped out doesn't come through here and
@@ -2616,6 +2621,7 @@ impl eframe::App for App {
                     self.show_stats,
                     self.player_pip,
                     &mut self.player_controls_active_since,
+                    &self.scrub_thumbs,
                 );
                 close_playback = action.close;
                 new_caption_mode = action.new_caption_mode;
