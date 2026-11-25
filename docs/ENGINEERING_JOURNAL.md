@@ -12,6 +12,17 @@
 
 This file adds the decision context that is usually missing from commit messages and GitHub activity history. Entries should stay concise and focus on why a change was made, what symptoms were observed, and how the solution was validated.
 
+## Native v2.4.1
+
+### 2026-11-25 - Native: player controls on mouse movement, option to keep them visible
+
+- Request: the player controls only reappeared after a click in the video; they should appear when the pointer moves over it. Also add an option to keep them visible.
+- Symptom: the overlay already treated pointer movement as activity, but checked it with egui's `is_moving()`. That reads a smoothed velocity which needs at least 3 position samples within 0.1 s, and ordinary movement over the video often never produced them, so only clicks reset the hide timer.
+- Solution:
+  - Activity is now any per-frame pointer delta (or raw motion), click or press. The 3 s hide delay is unchanged.
+  - New persisted setting `keep_player_controls_visible`, toggled from Settings → Appearance or the player's Pin Controls / Unpin Controls button. It applies docked and in the PIP window.
+- Validation: builds; tests pass. Confirmed by the user in the app.
+
 ## Native v2.4.0
 
 ### 2026-11-19 - Native: scrubber hover thumbnails
