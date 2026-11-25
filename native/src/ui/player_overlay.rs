@@ -76,6 +76,8 @@ pub struct PlayerOverlayAction {
     /// (`true`) or docks it back (`false`, also sent when the PIP window's
     /// own close button is used).
     pub new_pip: Option<bool>,
+    /// `Some` the frame the user pins (`true`) or unpins the controls.
+    pub new_keep_controls_visible: Option<bool>,
 }
 
 /// Everything the overlay renders from — bundled so one body can be drawn
@@ -93,6 +95,7 @@ struct View<'a> {
     diagnostics_enabled: bool,
     show_stats: bool,
     pip: bool,
+    keep_controls_visible: bool,
     thumbs: &'a crate::player::thumbs::Thumbnails,
 }
 
@@ -111,6 +114,7 @@ pub fn show(
     diagnostics_enabled: bool,
     show_stats: bool,
     pip: bool,
+    keep_controls_visible: bool,
     controls_active_since: &mut Instant,
     thumbs: &crate::player::thumbs::Thumbnails,
 ) -> PlayerOverlayAction {
@@ -127,6 +131,7 @@ pub fn show(
         diagnostics_enabled,
         show_stats,
         pip,
+        keep_controls_visible,
         thumbs,
     };
     let mut action = PlayerOverlayAction::default();
@@ -453,14 +458,23 @@ fn body(
     // Any pointer activity resets the idle clock — checked globally (not
     // scoped to a particular widget) since the whole point is "the user is
     // still around," not "the user is touching this specific control."
-    let pointer_active =
-        ctx.input(|i| i.pointer.is_moving() || i.pointer.any_click() || i.pointer.any_pressed());
+    // Movement is read from the per-frame position delta rather than
+    // `is_moving()`: that one needs a smoothed velocity built from several
+    // samples within 0.1s, which ordinary movement over the video often
+    // never produces, so the controls only came back on a click.
+    let pointer_active = ctx.input(|i| {
+        i.pointer.delta() != egui::Vec2::ZERO
+            || i.pointer.motion().is_some_and(|m| m != egui::Vec2::ZERO)
+            || i.pointer.any_click()
+            || i.pointer.any_pressed()
+    });
     if pointer_active {
         *controls_active_since = Instant::now();
     }
     // Applies to every kind of playback now (live and recorded alike) —
     // originally scoped to live only, extended on request.
-    let controls_visible = controls_active_since.elapsed() < CONTROLS_HIDE_DELAY;
+    let controls_visible =
+        view.keep_controls_visible || controls_active_since.elapsed() < CONTROLS_HIDE_DELAY;
 
     // Keyboard shortcuts, checked once per frame regardless of which widget
     // has focus — matches the old app's onPlayerKeyDown, which listened
@@ -667,6 +681,19 @@ fn body(
             };
             if ui.button(pip_label).on_hover_text(pip_hint).clicked() {
                 action.new_pip = Some(!view.pip);
+            }
+
+            let pin_label = if view.keep_controls_visible {
+                "Unpin Controls"
+            } else {
+                "Pin Controls"
+            };
+            if ui
+                .button(pin_label)
+                .on_hover_text("Keep these controls showing instead of hiding when the pointer is idle")
+                .clicked()
+            {
+                action.new_keep_controls_visible = Some(!view.keep_controls_visible);
             }
 
             if ui.button("✖ Close").clicked() {

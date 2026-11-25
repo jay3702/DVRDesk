@@ -174,6 +174,10 @@ pub struct AppSettings {
     pub window_always_on_top: bool,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    /// Keep the player's controls showing instead of hiding them after the
+    /// pointer sits still.
+    #[serde(default)]
+    pub keep_player_controls_visible: bool,
     /// URL of an optionally separately-run `guide-history-service`
     /// instance — entirely optional; when unset (the default), the guide
     /// grid behaves exactly as it does without this feature at all.
@@ -217,6 +221,7 @@ impl Default for AppSettings {
             theme: default_theme(),
             window_always_on_top: false,
             sidebar_collapsed: false,
+            keep_player_controls_visible: false,
             history_service_url: None,
             guide_deploy_targets: Vec::new(),
             download_dir: String::new(),

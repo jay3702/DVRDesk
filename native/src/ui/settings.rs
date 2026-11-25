@@ -278,6 +278,16 @@ pub fn show(
         if let Some(hint) = crate::ui::always_on_top_hint() {
             ui.label(egui::RichText::new(hint).small().weak());
         }
+        if ui
+            .checkbox(
+                &mut settings.keep_player_controls_visible,
+                "Keep player controls visible",
+            )
+            .on_hover_text("Otherwise the controls hide when the pointer is idle over the video")
+            .changed()
+        {
+            action.settings_changed = true;
+        }
         ui.add_space(8.0);
         ui.separator();
 

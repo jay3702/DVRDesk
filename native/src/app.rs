@@ -2601,6 +2601,7 @@ impl eframe::App for App {
         let mut new_show_stats = None;
         let mut save_frame = false;
         let mut new_pip = None;
+        let mut new_keep_controls = None;
         if let Some(now_playing) = &self.now_playing {
             if let Ok(player) = &self.player {
                 let showing_toast = self
@@ -2620,6 +2621,7 @@ impl eframe::App for App {
                     self.settings.diagnostics_enabled,
                     self.show_stats,
                     self.player_pip,
+                    self.settings.keep_player_controls_visible,
                     &mut self.player_controls_active_since,
                     &self.scrub_thumbs,
                 );
@@ -2630,6 +2632,7 @@ impl eframe::App for App {
                 new_show_stats = action.new_show_stats;
                 save_frame = action.save_frame;
                 new_pip = action.new_pip;
+                new_keep_controls = action.new_keep_controls_visible;
             }
         }
         if save_frame {
@@ -2637,6 +2640,12 @@ impl eframe::App for App {
         }
         if let Some(show_stats) = new_show_stats {
             self.show_stats = show_stats;
+        }
+        if let Some(keep) = new_keep_controls {
+            self.settings.keep_player_controls_visible = keep;
+            if let Err(e) = self.settings.save() {
+                eprintln!("settings: failed to save: {e}");
+            }
         }
         if let Some(mode) = new_caption_mode {
             self.caption_mode = mode;
